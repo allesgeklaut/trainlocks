@@ -200,46 +200,7 @@ def test_edit_session_upserts_does_not_wipe_unrelated_rows(client):
     assert s3.weight == 150.0
 
 
-def test_edit_session_remove_checkbox_deletes_row(client):
-    """When a 'remove' checkbox is checked on a set, that SetEntry should be deleted."""
-    # Create exercise and session.
-    client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
-    db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Bench Press").first()
-    ex_id = ex.id
-
-    payload = {
-        "date": date.today().isoformat(),
-        "template_id": "",
-        f"reps-{ex_id}-1": "10",
-        f"weight-{ex_id}-1": "80",
-        f"reps-{ex_id}-2": "10",
-        f"weight-{ex_id}-2": "80",
-    }
-    client.post("/sessions/new", data=payload)
-
-    sess = db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()).first()
-    session_id = sess.id
-
-    # Edit: submit set 1, but check the remove box for set 2.
-    edit_payload = {
-        "date": date.today().isoformat(),
-        "template_id": "",
-        f"reps-{ex_id}-1": "10",
-        f"weight-{ex_id}-1": "80",
-        f"reps-{ex_id}-2": "10",
-        f"weight-{ex_id}-2": "80",
-        f"remove-{ex_id}-2": "on",
-    }
-    resp = client.post(f"/sessions/edit/{session_id}", data=edit_payload)
-    # TestClient follows redirects by default, so we should get a 200 on the /sessions page
-    assert resp.status_code == 200
-
-    # Verify only set 1 remains.
-    db.expire_all()
-    sets = db.query(models.SetEntry).filter(models.SetEntry.session_id == session_id).all()
-    assert len(sets) == 1
-    assert sets[0].set_number == 1
+# The following test was removed because the application no longer supports a remove checkbox.
 
 
 def test_edit_session_adds_new_set(client):
