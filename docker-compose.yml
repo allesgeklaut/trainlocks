@@ -5,8 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    # Bind mount so the database file is visible in the repository.
     volumes:
-      - training_log_data:/data
+      - ./training_log_data:/data
+    environment:
+      - DATABASE_URL=sqlite:////data/training_log.db
 
-volumes:
-  training_log_data:

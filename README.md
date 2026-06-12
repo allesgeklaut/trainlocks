@@ -26,7 +26,7 @@ Data is persisted in a named Docker volume (`training_log_data`).
   uv sync [--frozen]
   # Create a /data directory or adjust SQLALCHEMY_DATABASE_URL in app/database.py
   mkdir -p /data
-  uv run uvicron app.main:app --reload
+  uv run uvicorn app.main:app --reload
 
 ## Stack
 
