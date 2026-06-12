@@ -222,18 +222,28 @@ async def edit_session_form(session_id: int, request: Request, db: Session = Dep
         def __init__(self, exercises):
             self.exercises = exercises
 
+    # Group sets by exercise and order exercises by their earliest set.
+    sets_by_exercise: dict[int, list[models.SetEntry]] = {}
+    order_counter = 0
+    exercise_order: dict[int, int] = {}
+    for se in sorted(sess.sets, key=lambda s: s.set_number):
+        if se.exercise_id not in sets_by_exercise:
+            sets_by_exercise[se.exercise_id] = []
+            exercise_order[se.exercise_id] = order_counter
+            order_counter += 1
+        sets_by_exercise[se.exercise_id].append(se)
+
     dummy_exercises = []
-    seen = set()
-    for se in sess.sets:
-        if se.exercise_id in seen:
-            continue
-        seen.add(se.exercise_id)
-        max_set = max(s.set_number for s in sess.sets if s.exercise_id == se.exercise_id)
+    for ex_id, ex_sets in sets_by_exercise.items():
+        # `sets` is the count of distinct set_numbers; we render one row per
+        # set plus one blank row so the "Add set" button has somewhere to start.
+        distinct_set_nums = {s.set_number for s in ex_sets}
+        set_count = len(distinct_set_nums)
         dummy_exercises.append(
             type("DummyTE", (), {
-                "exercise": se.exercise,
-                "sets": max_set,
-                "order": 0,
+                "exercise": ex_sets[0].exercise,
+                "sets": set_count,
+                "order": exercise_order[ex_id],
             })())
     dummy_template = DummyTemplate(dummy_exercises)
 
@@ -259,25 +269,73 @@ async def edit_session(session_id: int, request: Request, db: Session = Depends(
     sess.template_id = int(form["template_id"]) if form.get("template_id") else None
     sess.notes = form.get("notes") or None
 
-    # Delete old sets
-    db.query(models.SetEntry).filter(models.SetEntry.session_id == session_id).delete(synchronize_session=False)
+    # Collect all (exercise_id, set_number) tuples that are being submitted.
+    submitted_pairs = set()
+    removed_pairs = set()
 
-    for key, value in form.items():
-        if not key.startswith("reps-") or not value:
+    # First pass: handle removes and collect submitted pairs.
+    for key in form.keys():
+        if key.startswith("remove-"):
+            # remove-EX-SET format
+            try:
+                _, ex_id_str, set_num_str = key.split("-")
+                removed_pairs.add((int(ex_id_str), int(set_num_str)))
+            except (ValueError, IndexError):
+                continue
+        elif key.startswith("reps-"):
+            # reps-EX-SET format
+            try:
+                _, ex_id_str, set_num_str = key.split("-")
+                submitted_pairs.add((int(ex_id_str), int(set_num_str)))
+            except (ValueError, IndexError):
+                continue
+
+    # Delete rows that are marked for removal.
+    for pair in removed_pairs:
+        db.query(models.SetEntry).filter(
+            models.SetEntry.session_id == session_id,
+            models.SetEntry.exercise_id == pair[0],
+            models.SetEntry.set_number == pair[1],
+        ).delete(synchronize_session=False)
+
+    # Upsert submitted rows (excluding those marked for removal).
+    for ex_id, set_num in submitted_pairs:
+        if (ex_id, set_num) in removed_pairs:
             continue
+        reps_val = form.get(f"reps-{ex_id}-{set_num}", "")
+        weight_val = form.get(f"weight-{ex_id}-{set_num}", "")
+
         try:
-            _, ex_id_str, set_num_str = key.split("-")
-            reps = int(value)
-        except (ValueError, AttributeError):
-            continue
-        weight_val = form.get(f"weight-{ex_id_str}-{set_num_str}")
-        db.add(models.SetEntry(
-            session_id=session_id,
-            exercise_id=int(ex_id_str),
-            set_number=int(set_num_str),
-            reps=reps,
-            weight=float(weight_val) if weight_val else None,
-        ))
+            reps = int(reps_val) if reps_val else 0
+        except ValueError:
+            reps = 0
+
+        try:
+            weight = float(weight_val) if weight_val else None
+        except ValueError:
+            weight = None
+
+        # Look up the existing row.
+        existing = db.query(models.SetEntry).filter(
+            models.SetEntry.session_id == session_id,
+            models.SetEntry.exercise_id == ex_id,
+            models.SetEntry.set_number == set_num,
+        ).first()
+
+        if existing:
+            # Update existing.
+            existing.reps = reps
+            existing.weight = weight
+        else:
+            # Create new.
+            db.add(models.SetEntry(
+                session_id=session_id,
+                exercise_id=ex_id,
+                set_number=set_num,
+                reps=reps,
+                weight=weight,
+            ))
+
     db.commit()
     return RedirectResponse(url="/sessions", status_code=303)
 

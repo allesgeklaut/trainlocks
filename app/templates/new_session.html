@@ -39,26 +39,52 @@
   </div>
 
   {% for te in selected_template.exercises %}
-  <div class="exercise-block" style="max-width:520px">
+  {% set ex_id = te.exercise.id %}
+  {% set is_bw = te.exercise.is_bodyweight %}
+  {# `te.sets` is the count of recorded sets; on edit we render one extra blank
+  row so the "Add set" button always has somewhere to start. #}
+  {% set total_rows = te.sets + (1 if session_id else 0) %}
+  <div class="exercise-block" data-edit="{{ '1' if session_id else '0' }}" data-ex-id="{{ ex_id }}"
+    style="max-width:520px">
     <div class="exercise-block-title">
-      {{ te.order }}. {{ te.exercise.name }}
-      {% if te.exercise.is_bodyweight %}<span class="badge badge-bw">Bodyweight</span>{% else %}<span
+      {{ te.order + 1 }}. {{ te.exercise.name }}
+      {% if is_bw %}<span class="badge badge-bw">Bodyweight</span>{% else %}<span
         class="badge badge-weighted">Weighted</span>{% endif %}
     </div>
     <div class="sets-grid">
       <div class="col-header">Set</div>
       <div class="col-header">Reps</div>
       <div class="col-header">Weight (kg)</div>
-      {% for s in range(1, te.sets + 1) %}
+      {% if session_id %}<div class="col-header">&nbsp;</div>{% endif %}
+      {% for s in range(1, total_rows + 1) %}
+      {% set es = existing_sets.get((ex_id, s)) if existing_sets else None %}
       <div class="set-num">{{ s }}</div>
-      <input type="number" name="reps-{{ te.exercise.id }}-{{ s }}" min="0" placeholder="0" />
-      {% if te.exercise.is_bodyweight %}
-      <input type="number" step="0.5" name="weight-{{ te.exercise.id }}-{{ s }}" min="0" placeholder="Added kg" />
+      <input type="number" name="reps-{{ ex_id }}-{{ s }}" min="0" placeholder="0"
+        value="{{ es.reps if es else '' }}" />
+      {% if is_bw %}
+      <input type="number" step="0.5" name="weight-{{ ex_id }}-{{ s }}" min="0" placeholder="Added kg"
+        value="{{ es.weight if es and es.weight is not none else '' }}" />
       {% else %}
-      <input type="number" step="0.5" name="weight-{{ te.exercise.id }}-{{ s }}" min="0" placeholder="kg" />
+      <input type="number" step="0.5" name="weight-{{ ex_id }}-{{ s }}" min="0" placeholder="kg"
+        value="{{ es.weight if es and es.weight is not none else '' }}" />
+      {% endif %}
+      {% if session_id %}
+      <label class="remove-set" title="Remove this set">
+        <input type="checkbox" name="remove-{{ ex_id }}-{{ s }}" />
+        <span aria-hidden="true">✕</span>
+      </label>
       {% endif %}
       {% endfor %}
     </div>
+    {% if session_id %}
+    <div class="exercise-block-actions">
+      <button type="button" class="btn btn-secondary btn-sm add-set-btn" data-ex-id="{{ ex_id }}"
+        data-weight-placeholder="{{ 'Added kg' if is_bw else 'kg' }}">
+        + Add set
+      </button>
+      <input type="hidden" name="extra_sets-{{ ex_id }}" value="0" class="extra-sets-input" />
+    </div>
+    {% endif %}
   </div>
   {% endfor %}
 
@@ -68,4 +94,8 @@
   </div>
 </form>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+{% if session_id %}
+<script src="/static/edit_session.js"></script>{% endif %}
 {% endblock %}
