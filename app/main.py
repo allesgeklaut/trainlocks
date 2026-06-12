@@ -6,6 +6,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 import httpx, json, os
+from dotenv import load_dotenv
+
+# Load environment variables from a .env file if present. This allows the
+# ``DATABASE_URL`` defined there to be read by ``app.database``.
+load_dotenv()
 
 from . import models
 from .database import Base, SessionLocal, engine
