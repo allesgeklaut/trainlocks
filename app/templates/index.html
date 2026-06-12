@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Dashboard</h1>
+  <p class="page-subtitle">Your training at a glance</p>
+</div>
+
+<div class="kpi-grid">
+  <div class="kpi-card">
+    <div class="kpi-label">Total Sessions</div>
+    <div class="kpi-value">{{ session_count }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Exercises</div>
+    <div class="kpi-value">{{ exercise_count }}</div>
+  </div>
+  <div class="kpi-card">
+    <div class="kpi-label">Templates</div>
+    <div class="kpi-value">{{ template_count }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-header">
+    <span class="section-title">Recent Sessions</span>
+    <a href="/sessions/new" class="btn btn-primary btn-sm">+ Log Session</a>
+  </div>
+  {% if recent_sessions %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Template</th><th>Notes</th></tr></thead>
+      <tbody>
+        {% for sess in recent_sessions %}
+        <tr>
+          <td>{{ sess.date }}</td>
+          <td>{{ sess.template.name if sess.template else "—" }}</td>
+          <td>{{ sess.notes or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+    <h3>No sessions yet</h3>
+    <p>Log your first session to start tracking your progress.</p>
+    <a href="/sessions/new" class="btn btn-primary">Log a Session</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

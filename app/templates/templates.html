@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Templates — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Session Templates</h1>
+  <p class="page-subtitle">Define your recurring workouts</p>
+</div>
+
+{% if request.query_params.get("imported") %}
+<div class="card" style="border-color:var(--color-success);color:var(--color-success);margin-bottom:var(--space-4);padding:var(--space-3) var(--space-5)">
+  ✓ Template imported. You can now log a session with it.
+  <a href="/sessions/new" style="color:var(--color-success);margin-left:var(--space-3)">Log session →</a>
+</div>
+{% endif %}
+<div class="card">
+  <div class="card-title">Create Template</div>
+  <form method="post" action="/templates" class="form-row">
+    <div class="form-group" style="flex:1;margin-bottom:0">
+      <label for="tpl-name">Template name</label>
+      <input type="text" id="tpl-name" name="name" placeholder="e.g. Push A" required />
+    </div>
+    <button type="submit" class="btn btn-primary" style="margin-bottom:0">Create</button>
+  </form>
+</div>
+
+{% if templates %}
+  {% for tpl in templates %}
+  <div class="card">
+    <div class="section-header">
+      <span class="card-title" style="margin-bottom:0">{{ tpl.name }}</span>
+      <form method="post" action="/templates/{{ tpl.id }}/delete" style="display:inline">
+        <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete template {{ tpl.name }}?')">Delete</button>
+      </form>
+    </div>
+
+    {% if tpl.exercises %}
+    <div class="table-wrap" style="margin-bottom:var(--space-4)">
+      <table>
+        <thead><tr><th>#</th><th>Exercise</th><th>Sets</th><th></th></tr></thead>
+        <tbody>
+          {% for te in tpl.exercises %}
+          <tr>
+            <td>{{ te.order }}</td>
+            <td>
+              {{ te.exercise.name }}
+              {% if te.exercise.is_bodyweight %}<span class="badge badge-bw" style="margin-left:var(--space-2)">BW</span>{% endif %}
+            </td>
+            <td>{{ te.sets }}</td>
+            <td>
+              <form method="post" action="/templates/{{ tpl.id }}/remove_exercise/{{ te.id }}" style="display:inline">
+                <button type="submit" class="btn btn-secondary btn-sm">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <form method="post" action="/templates/{{ tpl.id }}/add_exercise" class="form-row">
+      <div class="form-group" style="margin-bottom:0;flex:2">
+        <label>Add exercise</label>
+        <select name="exercise_id" required>
+          {% for ex in exercises %}
+          <option value="{{ ex.id }}">{{ ex.name }}{% if ex.is_bodyweight %} (BW){% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0;width:100px">
+        <label>Sets</label>
+        <input type="number" name="sets" value="3" min="1" max="20" />
+      </div>
+      <button type="submit" class="btn btn-secondary" style="margin-bottom:0">Add</button>
+    </form>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
+    <h3>No templates yet</h3>
+    <p>Create your first template above, then add exercises to it.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

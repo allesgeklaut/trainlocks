@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Log Session — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Log Session</h1>
+  <p class="page-subtitle">Record your workout</p>
+</div>
+
+<div class="card" style="max-width:520px">
+  <div class="card-title">Select Template</div>
+  <form method="get" action="/sessions/new">
+    <select name="template_id" onchange="this.form.submit()" style="width:100%">
+      <option value="">— choose template —</option>
+      {% for tpl in templates %}
+      <option value="{{ tpl.id }}" {% if selected_template and tpl.id == selected_template.id %}selected{% endif %}>{{ tpl.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+{% if selected_template %}
+<form method="post" action="/sessions/new">
+  <input type="hidden" name="template_id" value="{{ selected_template.id }}" />
+
+  <div class="card" style="max-width:520px">
+    <div class="card-title">Session Details</div>
+    <div class="form-group">
+      <label for="date">Date</label>
+      <input type="date" id="date" name="date" value="{{ today }}" required />
+    </div>
+    <div class="form-group">
+      <label for="notes">Notes (optional)</label>
+      <textarea id="notes" name="notes" rows="2" placeholder="How did it feel?"></textarea>
+    </div>
+  </div>
+
+  {% for te in selected_template.exercises %}
+  <div class="exercise-block" style="max-width:520px">
+    <div class="exercise-block-title">
+      {{ te.order }}. {{ te.exercise.name }}
+      {% if te.exercise.is_bodyweight %}<span class="badge badge-bw">Bodyweight</span>{% else %}<span class="badge badge-weighted">Weighted</span>{% endif %}
+    </div>
+    <div class="sets-grid">
+      <div class="col-header">Set</div>
+      <div class="col-header">Reps</div>
+      <div class="col-header">Weight (kg)</div>
+      {% for s in range(1, te.sets + 1) %}
+      <div class="set-num">{{ s }}</div>
+      <input type="number" name="reps-{{ te.exercise.id }}-{{ s }}" min="0" placeholder="0" />
+      {% if te.exercise.is_bodyweight %}
+      <input type="number" step="0.5" name="weight-{{ te.exercise.id }}-{{ s }}" min="0" placeholder="Added kg" />
+      {% else %}
+      <input type="number" step="0.5" name="weight-{{ te.exercise.id }}-{{ s }}" min="0" placeholder="kg" />
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  <div style="max-width:520px">
+    <button type="submit" class="btn btn-primary">Save Session</button>
+    <a href="/sessions" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Training Log{% endblock %}</title>
+  <link rel="preconnect" href="https://api.fontshare.com" />
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav class="sidebar" id="sidebar" aria-label="Main navigation">
+  <a href="/" class="sidebar-logo" aria-label="Training Log home">
+    <!-- Barbell SVG logo -->
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+      <rect x="1" y="12" width="26" height="4" rx="2" fill="currentColor" opacity="0.15"/>
+      <rect x="3" y="11" width="22" height="6" rx="2" stroke="currentColor" stroke-width="1.5" fill="none"/>
+      <rect x="0" y="9" width="5" height="10" rx="2" fill="currentColor"/>
+      <rect x="23" y="9" width="5" height="10" rx="2" fill="currentColor"/>
+    </svg>
+    Training Log
+  </a>
+
+  {% set path = request.url.path %}
+  <a href="/" class="nav-link {% if path == '/' %}active{% endif %}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+    Dashboard
+  </a>
+  <a href="/exercises" class="nav-link {% if path.startswith('/exercises') %}active{% endif %}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+    Exercises
+  </a>
+  <a href="/templates" class="nav-link {% if path.startswith('/templates') %}active{% endif %}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
+    Templates
+  </a>
+  <a href="/sessions/new" class="nav-link {% if path == '/sessions/new' %}active{% endif %}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+    Log Session
+  </a>
+  <a href="/sessions" class="nav-link {% if path == '/sessions' %}active{% endif %}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+    Sessions
+  </a>
+  <a href="/progression" class="nav-link {% if path.startswith('/progression') %}active{% endif %}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    Progression
+  </a>
+
+  <div class="nav-section-label">Discover</div>
+  <a href="/browse/exercises" class="nav-link {% if path.startswith('/browse/exercises') %}active{% endif %}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    Browse Exercises
+  </a>
+  <a href="/browse/plans" class="nav-link {% if path.startswith('/browse/plans') %}active{% endif %}">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+    Training Plans
+  </a>
+
+  <div class="sidebar-footer">
+    <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      Toggle theme
+    </button>
+  </div>
+</nav>
+
+<main class="main" id="main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<script>
+(function(){
+  const t = document.querySelector("[data-theme-toggle]");
+  const r = document.documentElement;
+  let d = matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light";
+  r.setAttribute("data-theme", d);
+  if (t) t.addEventListener("click", () => {
+    d = d === "dark" ? "light" : "dark";
+    r.setAttribute("data-theme", d);
+  });
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

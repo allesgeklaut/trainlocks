@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Exercises — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Exercises</h1>
+</div>
+
+{% if request.query_params.get("imported") %}
+<div class="card" style="border-color:var(--color-success);color:var(--color-success);margin-bottom:var(--space-4);padding:var(--space-3) var(--space-5)">
+  ✓ {{ request.query_params.get("imported") }} exercise(s) imported successfully.
+  <a href="/browse/exercises" style="color:var(--color-success);margin-left:var(--space-3)">Browse more →</a>
+</div>
+{% endif %}
+<div class="card-grid">
+  <div class="card">
+    <div class="card-title">Add Exercise</div>
+    <form method="post" action="/exercises">
+      <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" placeholder="e.g. Romanian Deadlift" required />
+      </div>
+      <div class="form-group checkbox-row">
+        <input type="checkbox" id="is_bodyweight" name="is_bodyweight" value="1" />
+        <label for="is_bodyweight">Bodyweight exercise</label>
+      </div>
+      <button type="submit" class="btn btn-primary">Add Exercise</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Exercise Library</div>
+    {% if exercises %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Name</th><th>Type</th><th></th></tr></thead>
+        <tbody>
+          {% for ex in exercises %}
+          <tr>
+            <td>{{ ex.name }}</td>
+            <td>
+              {% if ex.is_bodyweight %}
+              <span class="badge badge-bw">Bodyweight</span>
+              {% else %}
+              <span class="badge badge-weighted">Weighted</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" action="/exercises/{{ ex.id }}/delete" style="display:inline">
+                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete {{ ex.name }}?')">Delete</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      <h3>No exercises yet</h3>
+      <p>Add your first exercise using the form.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
