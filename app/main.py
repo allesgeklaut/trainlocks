@@ -242,7 +242,7 @@ async def create_session(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/sessions/{session_id}/delete")
 async def delete_session(session_id: int, db: Session = Depends(get_db)):
-    sess = db.query(models.WorkoutSession).get(session_id)
+    sess = db.get(models.WorkoutSession, session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
     db.delete(sess)
@@ -251,7 +251,7 @@ async def delete_session(session_id: int, db: Session = Depends(get_db)):
 
 @app.get("/sessions/edit/{session_id}", response_class=HTMLResponse)
 async def edit_session_form(session_id: int, request: Request, db: Session = Depends(get_db)):
-    sess = db.query(models.WorkoutSession).get(session_id)
+    sess = db.get(models.WorkoutSession, session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -295,7 +295,7 @@ async def edit_session_form(session_id: int, request: Request, db: Session = Dep
 
 @app.post("/sessions/edit/{session_id}")
 async def edit_session(session_id: int, request: Request, db: Session = Depends(get_db)):
-    sess = db.query(models.WorkoutSession).get(session_id)
+    sess = db.get(models.WorkoutSession, session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
 
