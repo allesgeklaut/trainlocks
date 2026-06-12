@@ -21,12 +21,12 @@ Open http://localhost:8000
 
 Data is persisted in a named Docker volume (`training_log_data`).
 
-## Run locally without Docker
+## Run locally without Docker (using uv)
 
-    pip install -r requirements.txt
-    # Create a /data directory or adjust SQLALCHEMY_DATABASE_URL in app/database.py
-    mkdir -p /data
-    uvicorn app.main:app --reload
+  uv sync [--frozen]
+  # Create a /data directory or adjust SQLALCHEMY_DATABASE_URL in app/database.py
+  mkdir -p /data
+  uv run uvicron app.main:app --reload
 
 ## Stack
 
