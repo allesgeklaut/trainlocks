@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Browse Exercises — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Browse Exercises</h1>
+  <p class="page-subtitle">800+ exercises from the open-source free-exercise-db — select and import into your library</p>
+</div>
+
+{% if error %}
+<div class="alert-error card" style="border-color:var(--color-error);color:var(--color-error);margin-bottom:var(--space-6)">
+  ⚠ Could not fetch exercise database: {{ error }}<br/>
+  <small>Check your internet connection or try again later.</small>
+</div>
+{% endif %}
+
+<!-- Filter bar -->
+<form method="get" action="/browse/exercises" id="filter-form">
+  <div class="card" style="margin-bottom:var(--space-6)">
+    <div class="card-title">Filter</div>
+    <div class="form-row" style="flex-wrap:wrap;gap:var(--space-3)">
+      <div class="form-group" style="margin-bottom:0;flex:2;min-width:160px">
+        <label>Search by name</label>
+        <input type="text" name="q" value="{{ q }}" placeholder="e.g. deadlift" />
+      </div>
+      <div class="form-group" style="margin-bottom:0;flex:1;min-width:130px">
+        <label>Category</label>
+        <select name="category">
+          <option value="">All</option>
+          {% for c in all_categories %}
+          <option value="{{ c }}" {% if category == c %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0;flex:1;min-width:140px">
+        <label>Primary muscle</label>
+        <select name="muscle">
+          <option value="">All</option>
+          {% for m in all_muscles %}
+          <option value="{{ m }}" {% if muscle == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0;flex:1;min-width:130px">
+        <label>Equipment</label>
+        <select name="equipment">
+          <option value="">All</option>
+          {% for e in all_equipment %}
+          <option value="{{ e }}" {% if equipment == e %}selected{% endif %}>{{ e }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0;flex:1;min-width:110px">
+        <label>Level</label>
+        <select name="level">
+          <option value="">All</option>
+          {% for l in all_levels %}
+          <option value="{{ l }}" {% if level == l %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="align-self:flex-end;padding-bottom:1px">
+        <button type="submit" class="btn btn-primary">Filter</button>
+        <a href="/browse/exercises" class="btn btn-secondary" style="margin-left:var(--space-2)">Reset</a>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% if exercises %}
+<form method="post" action="/browse/exercises/import" id="import-form">
+  <!-- hidden bw names populated by JS -->
+  <div id="bw-hidden-container"></div>
+
+  <div class="card">
+    <div class="section-header">
+      <span class="section-title">{{ total }} result{% if total != 1 %}s{% endif %}{% if total > 200 %} (showing first 200){% endif %}</span>
+      <div style="display:flex;gap:var(--space-3);align-items:center">
+        <span id="selected-count" style="font-size:var(--text-sm);color:var(--color-text-muted)">0 selected</span>
+        <button type="button" class="btn btn-secondary btn-sm" id="select-all-btn">Select all</button>
+        <button type="submit" class="btn btn-primary btn-sm" id="import-btn" disabled>Import selected</button>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:2rem"></th>
+            <th>Name</th>
+            <th>Category</th>
+            <th>Primary muscles</th>
+            <th>Equipment</th>
+            <th>Level</th>
+            <th>BW?</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ex in exercises %}
+          <tr>
+            <td><input type="checkbox" name="exercise_names" value="{{ ex.name }}" class="ex-check" /></td>
+            <td style="font-weight:500">{{ ex.name }}</td>
+            <td><span class="badge badge-weighted">{{ ex.category or "—" }}</span></td>
+            <td style="font-size:var(--text-xs)">{{ (ex.primaryMuscles or []) | join(", ") }}</td>
+            <td style="font-size:var(--text-xs)">{{ ex.equipment or "—" }}</td>
+            <td style="font-size:var(--text-xs)">{{ ex.level or "—" }}</td>
+            <td>
+              {% if ex.equipment == "body only" %}
+              <input type="checkbox" class="bw-check" data-name="{{ ex.name }}" checked title="Mark as bodyweight" />
+              {% else %}
+              <input type="checkbox" class="bw-check" data-name="{{ ex.name }}" title="Mark as bodyweight" />
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</form>
+{% else %}
+{% if not error %}
+<div class="card">
+  <div class="empty-state">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <h3>No exercises found</h3>
+    <p>Try adjusting your filters.</p>
+    <a href="/browse/exercises" class="btn btn-secondary">Clear filters</a>
+  </div>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  const checks  = () => [...document.querySelectorAll(".ex-check")];
+  const counter = document.getElementById("selected-count");
+  const btn     = document.getElementById("import-btn");
+  const selAll  = document.getElementById("select-all-btn");
+  const bwCont  = document.getElementById("bw-hidden-container");
+
+  function updateCount() {
+    const n = checks().filter(c => c.checked).length;
+    counter.textContent = n + " selected";
+    btn.disabled = n === 0;
+  }
+
+  document.querySelectorAll(".ex-check").forEach(c => c.addEventListener("change", updateCount));
+
+  let allSelected = false;
+  selAll.addEventListener("click", () => {
+    allSelected = !allSelected;
+    checks().forEach(c => c.checked = allSelected);
+    selAll.textContent = allSelected ? "Deselect all" : "Select all";
+    updateCount();
+  });
+
+  document.getElementById("import-form").addEventListener("submit", () => {
+    // inject hidden inputs for bodyweight flags on checked exercises
+    bwCont.innerHTML = "";
+    document.querySelectorAll(".bw-check").forEach(bw => {
+      if (bw.checked) {
+        const inp = document.createElement("input");
+        inp.type = "hidden";
+        inp.name = "bw_names";
+        inp.value = bw.dataset.name;
+        bwCont.appendChild(inp);
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Progression — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Progression</h1>
+  <p class="page-subtitle">Track how your lifts develop over time</p>
+</div>
+
+<div class="card" style="max-width:400px;margin-bottom:var(--space-6)">
+  <div class="card-title">Select Exercise</div>
+  <form method="get" action="/progression">
+    <select name="exercise_id" onchange="this.form.submit()" style="width:100%">
+      <option value="">— choose exercise —</option>
+      {% for ex in exercises %}
+      <option value="{{ ex.id }}" {% if selected_exercise and ex.id == selected_exercise.id %}selected{% endif %}>
+        {{ ex.name }}{% if ex.is_bodyweight %} (BW){% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+</div>
+
+{% if selected_exercise %}
+<div id="chart-section">
+  <div class="card-grid">
+    <div class="card">
+      <div class="card-title">Top Weight per Session (kg)</div>
+      <div class="chart-container"><canvas id="weightChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Total Volume per Session (kg × reps)</div>
+      <div class="chart-container"><canvas id="volumeChart"></canvas></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">Progression History</div>
+    <div id="table-placeholder" class="empty-state" style="padding:var(--space-8)">
+      <p>Loading data…</p>
+    </div>
+    <div id="table-wrap" class="table-wrap" style="display:none">
+      <table>
+        <thead><tr><th>Date</th><th>Top Weight (kg)</th><th>Volume (kg×reps)</th><th>Total Reps</th></tr></thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    <h3>Choose an exercise</h3>
+    <p>Select an exercise above to see your progression charts.</p>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if selected_exercise %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+(async function() {
+  const exerciseId = {{ selected_exercise.id }};
+  const res = await fetch(`/api/progression/${exerciseId}`);
+  const { data } = await res.json();
+
+  // fill table
+  const tbody = document.getElementById("table-body");
+  if (data.length === 0) {
+    document.getElementById("table-placeholder").style.display = "flex";
+    document.getElementById("table-placeholder").querySelector("p").textContent = "No sessions logged for this exercise yet.";
+  } else {
+    document.getElementById("table-placeholder").style.display = "none";
+    document.getElementById("table-wrap").style.display = "";
+    data.forEach(r => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${r.date}</td><td>${r.top_weight.toFixed(1)}</td><td>${r.volume.toFixed(1)}</td><td>${r.total_reps}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // resolve CSS tokens for chart theming
+  const style = getComputedStyle(document.documentElement);
+  const colorText     = style.getPropertyValue("--color-text").trim();
+  const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
+  const colorPrimary  = style.getPropertyValue("--color-primary").trim();
+  const colorOrange   = style.getPropertyValue("--color-orange").trim();
+  const colorDivider  = style.getPropertyValue("--color-divider").trim();
+
+  const labels = data.map(r => r.date);
+
+  const baseOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 700, easing: "easeOutQuart" },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: style.getPropertyValue("--color-surface-2").trim(),
+        titleColor: colorText,
+        bodyColor: colorMuted,
+        borderColor: style.getPropertyValue("--color-border").trim(),
+        borderWidth: 1,
+        padding: 10,
+      },
+    },
+    scales: {
+      x: {
+        ticks: { color: colorMuted, font: { size: 11 } },
+        grid: { color: colorDivider },
+      },
+      y: {
+        ticks: { color: colorMuted, font: { size: 11 } },
+        grid: { color: colorDivider },
+        beginAtZero: false,
+      },
+    },
+  };
+
+  function makeGradient(ctx, color) {
+    const g = ctx.createLinearGradient(0, 0, 0, 280);
+    g.addColorStop(0, color + "55");
+    g.addColorStop(1, color + "00");
+    return g;
+  }
+
+  // Weight chart
+  const wCtx = document.getElementById("weightChart").getContext("2d");
+  new Chart(wCtx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        data: data.map(r => r.top_weight),
+        borderColor: colorPrimary,
+        backgroundColor: makeGradient(wCtx, colorPrimary),
+        borderWidth: 2.5,
+        pointBackgroundColor: colorPrimary,
+        pointRadius: data.length > 30 ? 2 : 4,
+        pointHoverRadius: 6,
+        fill: true,
+        tension: 0.35,
+      }]
+    },
+    options: baseOptions,
+  });
+
+  // Volume chart
+  const vCtx = document.getElementById("volumeChart").getContext("2d");
+  new Chart(vCtx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data: data.map(r => r.volume),
+        backgroundColor: colorOrange + "cc",
+        borderColor: colorOrange,
+        borderWidth: 1.5,
+        borderRadius: 4,
+        hoverBackgroundColor: colorOrange,
+      }]
+    },
+    options: baseOptions,
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,12 @@
+services:
+  training-log:
+    build: .
+    container_name: training-log
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - training_log_data:/data
+
+volumes:
+  training_log_data:
