@@ -54,8 +54,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
     sessions = db.query(models.WorkoutSession).order_by(models.WorkoutSession.date.desc()).limit(5).all()
     exercises = db.query(models.Exercise).all()
     templates_db = db.query(models.SessionTemplate).all()
-    return templates.TemplateResponse("index.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "index.html", {
         "recent_sessions": sessions,
         "exercise_count": len(exercises),
         "template_count": len(templates_db),
@@ -66,7 +65,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
 @app.get("/exercises", response_class=HTMLResponse)
 async def list_exercises(request: Request, db: Session = Depends(get_db)):
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
-    return templates.TemplateResponse("exercises.html", {"request": request, "exercises": exercises})
+    return templates.TemplateResponse(request, "exercises.html", {"exercises": exercises})
 
 
 @app.post("/exercises")
@@ -98,8 +97,8 @@ async def delete_exercise(exercise_id: int, db: Session = Depends(get_db)):
 async def list_templates(request: Request, db: Session = Depends(get_db)):
     templates_db = db.query(models.SessionTemplate).order_by(models.SessionTemplate.name).all()
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
-    return templates.TemplateResponse("templates.html", {
-        "request": request, "templates": templates_db, "exercises": exercises
+    return templates.TemplateResponse(request, "templates.html", {
+        "templates": templates_db, "exercises": exercises
     })
 
 
@@ -154,15 +153,15 @@ async def delete_template(template_id: int, db: Session = Depends(get_db)):
 @app.get("/sessions", response_class=HTMLResponse)
 async def list_sessions(request: Request, db: Session = Depends(get_db)):
     sessions = db.query(models.WorkoutSession).order_by(models.WorkoutSession.date.desc()).all()
-    return templates.TemplateResponse("sessions.html", {"request": request, "sessions": sessions})
+    return templates.TemplateResponse(request, "sessions.html", {"sessions": sessions})
 
 
 @app.get("/sessions/new", response_class=HTMLResponse)
 async def new_session(request: Request, template_id: Optional[int] = None, db: Session = Depends(get_db)):
     templates_db = db.query(models.SessionTemplate).order_by(models.SessionTemplate.name).all()
     selected_template = db.query(models.SessionTemplate).get(template_id) if template_id else None
-    return templates.TemplateResponse("new_session.html", {
-        "request": request, "templates": templates_db,
+    return templates.TemplateResponse(request, "new_session.html", {
+        "templates": templates_db,
         "selected_template": selected_template, "today": date.today(),
     })
 
@@ -199,13 +198,96 @@ async def create_session(request: Request, db: Session = Depends(get_db)):
     db.commit()
     return RedirectResponse(url="/sessions", status_code=303)
 
+# ---------------------------------------------------------------------------
+# Session CRUD – delete & edit
+# ---------------------------------------------------------------------------
+
+@app.post("/sessions/{session_id}/delete")
+async def delete_session(session_id: int, db: Session = Depends(get_db)):
+    sess = db.query(models.WorkoutSession).get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    db.delete(sess)
+    db.commit()
+    return RedirectResponse(url="/sessions", status_code=303)
+
+@app.get("/sessions/edit/{session_id}", response_class=HTMLResponse)
+async def edit_session_form(session_id: int, request: Request, db: Session = Depends(get_db)):
+    sess = db.query(models.WorkoutSession).get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Build a dummy template structure for the form
+    class DummyTemplate:
+        def __init__(self, exercises):
+            self.exercises = exercises
+
+    dummy_exercises = []
+    seen = set()
+    for se in sess.sets:
+        if se.exercise_id in seen:
+            continue
+        seen.add(se.exercise_id)
+        max_set = max(s.set_number for s in sess.sets if s.exercise_id == se.exercise_id)
+        dummy_exercises.append(
+            type("DummyTE", (), {
+                "exercise": se.exercise,
+                "sets": max_set,
+                "order": 0,
+            })())
+    dummy_template = DummyTemplate(dummy_exercises)
+
+    return templates.TemplateResponse(request, "new_session.html", {
+        "templates": [],
+        "selected_template": dummy_template,
+        "today": sess.date,
+        "session_id": session_id,
+        "existing_sets": {(se.exercise_id, se.set_number): se for se in sess.sets},
+    })
+
+@app.post("/sessions/edit/{session_id}")
+async def edit_session(session_id: int, request: Request, db: Session = Depends(get_db)):
+    sess = db.query(models.WorkoutSession).get(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    form = await request.form()
+    date_str = form.get("date")
+    if not date_str:
+        raise HTTPException(status_code=400, detail="Date required")
+    sess.date = date.fromisoformat(date_str)
+    sess.template_id = int(form["template_id"]) if form.get("template_id") else None
+    sess.notes = form.get("notes") or None
+
+    # Delete old sets
+    db.query(models.SetEntry).filter(models.SetEntry.session_id == session_id).delete(synchronize_session=False)
+
+    for key, value in form.items():
+        if not key.startswith("reps-") or not value:
+            continue
+        try:
+            _, ex_id_str, set_num_str = key.split("-")
+            reps = int(value)
+        except (ValueError, AttributeError):
+            continue
+        weight_val = form.get(f"weight-{ex_id_str}-{set_num_str}")
+        db.add(models.SetEntry(
+            session_id=session_id,
+            exercise_id=int(ex_id_str),
+            set_number=int(set_num_str),
+            reps=reps,
+            weight=float(weight_val) if weight_val else None,
+        ))
+    db.commit()
+    return RedirectResponse(url="/sessions", status_code=303)
+
 
 @app.get("/progression", response_class=HTMLResponse)
 async def progression(request: Request, exercise_id: Optional[int] = None, db: Session = Depends(get_db)):
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
     selected_exercise = db.query(models.Exercise).get(exercise_id) if exercise_id else None
-    return templates.TemplateResponse("progression.html", {
-        "request": request, "exercises": exercises, "selected_exercise": selected_exercise,
+    return templates.TemplateResponse(request, "progression.html", {
+        "exercises": exercises, "selected_exercise": selected_exercise,
     })
 
 
@@ -225,8 +307,13 @@ async def progression_data(exercise_id: int, db: Session = Depends(get_db)):
         sets = [s for s in sess.sets if s.exercise_id == exercise_id]
         if not sets:
             continue
-        top_weight = max((s.weight or 0.0) for s in sets)
-        volume = sum((s.weight or 0.0) * s.reps for s in sets)
+        # Skip body‑weight sets that have no added weight – they should not
+        # contribute to load calculations.
+        filtered_sets = [s for s in sets if not (s.exercise.is_bodyweight and s.weight is None)]
+        if not filtered_sets:
+            continue
+        top_weight = max((s.weight or 0.0) for s in filtered_sets)
+        volume = sum((s.weight or 0.0) * s.reps for s in filtered_sets)
         total_reps = sum(s.reps for s in sets)
         rows.append({
             "date": str(sess.date),
@@ -275,8 +362,7 @@ async def browse_exercises(
     if level:
         filtered = [ex for ex in filtered if ex.get("level") == level]
 
-    return templates.TemplateResponse("browse_exercises.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "browse_exercises.html", {
         "exercises": filtered[:200],  # cap at 200 for perf
         "total": len(filtered),
         "all_categories": all_categories,
@@ -314,8 +400,7 @@ async def browse_plans(request: Request, db: Session = Depends(get_db)):
         plans = json.load(f)
     existing_templates = {t.name for t in db.query(models.SessionTemplate).all()}
     existing_exercises = {e.name for e in db.query(models.Exercise).all()}
-    return templates.TemplateResponse("browse_plans.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "browse_plans.html", {
         "plans": plans,
         "existing_templates": existing_templates,
         "existing_exercises": existing_exercises,
