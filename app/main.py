@@ -172,29 +172,67 @@ async def create_session(request: Request, db: Session = Depends(get_db)):
     date_str = form.get("date")
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
+    
+    template_id = int(form["template_id"]) if form.get("template_id") else None
+    template = db.query(models.SessionTemplate).get(template_id) if template_id else None
+    
     workout = models.WorkoutSession(
         date=date.fromisoformat(date_str),
-        template_id=int(form["template_id"]) if form.get("template_id") else None,
+        template_id=template_id,
         notes=form.get("notes") or None,
     )
     db.add(workout)
     db.flush()
+    
+    # If a template was selected, create SetEntry rows for all template exercises/sets.
+    if template:
+        for te in template.exercises:
+            for set_num in range(1, te.sets + 1):
+                db.add(models.SetEntry(
+                    session_id=workout.id,
+                    exercise_id=te.exercise_id,
+                    set_number=set_num,
+                    reps=0,
+                    weight=None,
+                ))
+    
+    # Update rows with user-submitted values.
     for key, value in form.items():
-        if not key.startswith("reps-") or not value:
+        if not key.startswith("reps-"):
             continue
         try:
             _, ex_id_str, set_num_str = key.split("-")
-            reps = int(value)
-        except (ValueError, AttributeError):
+            ex_id = int(ex_id_str)
+            set_num = int(set_num_str)
+            reps = int(value) if value else 0
+        except (ValueError, IndexError):
             continue
-        weight_val = form.get(f"weight-{ex_id_str}-{set_num_str}")
-        db.add(models.SetEntry(
-            session_id=workout.id,
-            exercise_id=int(ex_id_str),
-            set_number=int(set_num_str),
-            reps=reps,
-            weight=float(weight_val) if weight_val else None,
-        ))
+        
+        weight_val = form.get(f"weight-{ex_id}-{set_num}")
+        try:
+            weight = float(weight_val) if weight_val else None
+        except ValueError:
+            weight = None
+        
+        # Update existing row, or create if it doesn't exist (for non-template sessions).
+        existing = db.query(models.SetEntry).filter(
+            models.SetEntry.session_id == workout.id,
+            models.SetEntry.exercise_id == ex_id,
+            models.SetEntry.set_number == set_num,
+        ).first()
+        
+        if existing:
+            existing.reps = reps
+            existing.weight = weight
+        else:
+            db.add(models.SetEntry(
+                session_id=workout.id,
+                exercise_id=ex_id,
+                set_number=set_num,
+                reps=reps,
+                weight=weight,
+            ))
+    
     db.commit()
     return RedirectResponse(url="/sessions", status_code=303)
 
@@ -269,20 +307,11 @@ async def edit_session(session_id: int, request: Request, db: Session = Depends(
     sess.template_id = int(form["template_id"]) if form.get("template_id") else None
     sess.notes = form.get("notes") or None
 
-    # Collect all (exercise_id, set_number) tuples that are being submitted.
+    # Collect all (exercise_id, set_number) tuples being submitted.
     submitted_pairs = set()
-    removed_pairs = set()
 
-    # First pass: handle removes and collect submitted pairs.
     for key in form.keys():
-        if key.startswith("remove-"):
-            # remove-EX-SET format
-            try:
-                _, ex_id_str, set_num_str = key.split("-")
-                removed_pairs.add((int(ex_id_str), int(set_num_str)))
-            except (ValueError, IndexError):
-                continue
-        elif key.startswith("reps-"):
+        if key.startswith("reps-"):
             # reps-EX-SET format
             try:
                 _, ex_id_str, set_num_str = key.split("-")
@@ -290,18 +319,8 @@ async def edit_session(session_id: int, request: Request, db: Session = Depends(
             except (ValueError, IndexError):
                 continue
 
-    # Delete rows that are marked for removal.
-    for pair in removed_pairs:
-        db.query(models.SetEntry).filter(
-            models.SetEntry.session_id == session_id,
-            models.SetEntry.exercise_id == pair[0],
-            models.SetEntry.set_number == pair[1],
-        ).delete(synchronize_session=False)
-
-    # Upsert submitted rows (excluding those marked for removal).
+    # Upsert submitted rows.
     for ex_id, set_num in submitted_pairs:
-        if (ex_id, set_num) in removed_pairs:
-            continue
         reps_val = form.get(f"reps-{ex_id}-{set_num}", "")
         weight_val = form.get(f"weight-{ex_id}-{set_num}", "")
 
