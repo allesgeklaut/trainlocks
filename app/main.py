@@ -1,17 +1,46 @@
+import os
+import argparse
+import tempfile
+import shutil
 from datetime import date
 from typing import Generator, Optional
+import httpx
+import json
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-import httpx, json, os
-from dotenv import load_dotenv
 
-# Load environment variables from a .env file if present. This allows the
-# ``DATABASE_URL`` defined there to be read by ``app.database``.
+# 1. Load environment variables first so they can be used for DB setup or by other modules
 load_dotenv()
 
+# 2. Parse configuration (Command line arguments and Environment Variables)
+parser = argparse.ArgumentParser(description='Training Log Dashboard')
+parser.add_argument('--test-db', action='store_true', help='Use test database with sample data')
+args, _ = parser.parse_known_args()
+
+# Support both command line flag and environment variable for flexibility (e.g. in Docker)
+use_test_db = args.test_db or os.getenv('USE_TEST_DB', '').lower() in ('true', '1', 'yes')
+
+if use_test_db:
+    # Create a temporary database file
+    temp_db_fd, temp_db_path = tempfile.mkstemp(suffix='.db', prefix='training_log_test_')
+    os.close(temp_db_fd)  # Close the file descriptor
+    
+    # Copy test database from tests/ folder to the temporary location
+    test_template_path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'test_database.db')
+    if os.path.exists(test_template_path):
+        shutil.copy2(test_template_path, temp_db_path)
+    else:
+        print(f"Warning: Test database template not found at {test_template_path}")
+
+    # Update DATABASE_URL environment variable BEFORE importing app modules that use it
+    os.environ['DATABASE_URL'] = f'sqlite:///{temp_db_path}'
+    print(f"Using test database: {temp_db_path}")
+
+# 3. Now import local application modules (which will now pick up the correct DATABASE_URL)
 from . import models
 from .database import Base, SessionLocal, engine
 
