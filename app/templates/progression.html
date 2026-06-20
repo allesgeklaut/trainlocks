@@ -161,7 +161,16 @@
         hoverBackgroundColor: colorOrange,
       }]
     },
-    options: baseOptions,
+    options: {
+      ...baseOptions,
+      scales: {
+        ...baseOptions.scales,
+        y: {
+          ...baseOptions.scales.y,
+          beginAtZero: true,
+        },
+      },
+    },
   });
 })();
 </script>

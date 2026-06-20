@@ -27,6 +27,7 @@
           <td>{{ sess.template.name if sess.template else "—" }}</td>
           <td>{{ sess.notes or "" }}</td>
           <td class="actions">
+            <a href="/sessions/{{ sess.id }}" class="btn btn-sm">View</a>
             <a href="/sessions/edit/{{ sess.id }}" class="btn btn-sm">Edit</a>
             <form method="post" action="/sessions/{{ sess.id }}/delete" style="display:inline;"
               onsubmit="return confirm('Delete this session?');">

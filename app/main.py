@@ -83,11 +83,37 @@ async def index(request: Request, db: Session = Depends(get_db)):
     sessions = db.query(models.WorkoutSession).order_by(models.WorkoutSession.date.desc()).limit(5).all()
     exercises = db.query(models.Exercise).all()
     templates_db = db.query(models.SessionTemplate).all()
+    
+    # Training load data for dashboard chart (last 12 weeks)
+    from datetime import timedelta
+    from collections import defaultdict
+    twelve_weeks_ago = date.today() - timedelta(weeks=12)
+    recent_sessions_full = (
+        db.query(models.WorkoutSession)
+        .filter(models.WorkoutSession.date >= twelve_weeks_ago)
+        .order_by(models.WorkoutSession.date)
+        .all()
+    )
+    # Build weekly training load: sum(weight * reps) per ISO week
+    weekly_load = defaultdict(float)
+    for sess in recent_sessions_full:
+        iso_cal = sess.date.isocalendar()
+        week_key = f"{iso_cal[0]}-W{iso_cal[1]:02d}"
+        for set_entry in sess.sets:
+            weight = set_entry.weight if set_entry.weight is not None else 1.0
+            weekly_load[week_key] += weight * set_entry.reps
+
+    weekly_data = [
+        {"date": k, "load": round(v, 0)}
+        for k, v in sorted(weekly_load.items())
+    ]
+    
     return templates.TemplateResponse(request, "index.html", {
         "recent_sessions": sessions,
         "exercise_count": len(exercises),
         "template_count": len(templates_db),
         "session_count": db.query(models.WorkoutSession).count(),
+        "weekly_activity": weekly_data,
     })
 
 
@@ -269,6 +295,13 @@ async def create_session(request: Request, db: Session = Depends(get_db)):
 # Session CRUD – delete & edit
 # ---------------------------------------------------------------------------
 
+@app.get("/sessions/{session_id}", response_class=HTMLResponse)
+async def view_session(session_id: int, request: Request, db: Session = Depends(get_db)):
+    sess = db.get(models.WorkoutSession, session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return templates.TemplateResponse(request, "view_session.html", {"session": sess})
+
 @app.post("/sessions/{session_id}/delete")
 async def delete_session(session_id: int, db: Session = Depends(get_db)):
     sess = db.get(models.WorkoutSession, session_id)
@@ -413,13 +446,9 @@ async def progression_data(exercise_id: int, db: Session = Depends(get_db)):
         sets = [s for s in sess.sets if s.exercise_id == exercise_id]
         if not sets:
             continue
-        # Skip body‑weight sets that have no added weight – they should not
-        # contribute to load calculations.
-        filtered_sets = [s for s in sets if not (s.exercise.is_bodyweight and s.weight is None)]
-        if not filtered_sets:
-            continue
-        top_weight = max((s.weight or 0.0) for s in filtered_sets)
-        volume = sum((s.weight or 0.0) * s.reps for s in filtered_sets)
+        # Treat missing weight as 1.0 so bodyweight sets contribute their rep count.
+        top_weight = max((s.weight if s.weight is not None else 1.0) for s in sets)
+        volume = sum((s.weight if s.weight is not None else 1.0) * s.reps for s in sets)
         total_reps = sum(s.reps for s in sets)
         rows.append({
             "date": str(sess.date),

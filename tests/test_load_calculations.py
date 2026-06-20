@@ -68,8 +68,8 @@ def test_load_calculations_with_varied_weights(client):
     assert row["volume"] == 1400.0
     assert row["total_reps"] == 24
 
-def test_bodyweight_no_weight_shows_no_load(client):
-    """Body‑weight exercise should not show a load of 0 when no weight is added."""
+def test_bodyweight_no_weight_shows_rep_count(client):
+    """Body‑weight exercise with no weight should show rep count as load."""
     # Create body‑weight exercise.
     client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
     db = SessionLocal()
@@ -89,8 +89,12 @@ def test_bodyweight_no_weight_shows_no_load(client):
     resp = client.get(f"/api/progression/{ex_id}")
     assert resp.status_code == 200
     data = resp.json()["data"]
-    # Since no weight was added, the exercise should not appear in progression.
-    assert len(data) == 0
+    # Bodyweight sets with no weight should appear with rep count as load.
+    assert len(data) == 1
+    row = data[0]
+    assert row["top_weight"] == 1.0
+    assert row["volume"] == 15.0
+    assert row["total_reps"] == 15
 
 
 # ── Edit Session Tests ────────────────────────────────────────────────────
