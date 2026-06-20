@@ -23,19 +23,35 @@
 
 <div class="card">
   <div class="section-header">
+    <span class="section-title">Weekly Training Load (Last 12 Weeks)</span>
+  </div>
+  {% if weekly_activity %}
+  <div style="height:200px;position:relative;">
+    <canvas id="activityChart"></canvas>
+  </div>
+  {% else %}
+  <p class="text-muted" style="text-align:center;padding:var(--space-6)">No training data yet. Log your first session to see activity!</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="section-header">
     <span class="section-title">Recent Sessions</span>
     <a href="/sessions/new" class="btn btn-primary btn-sm">+ Log Session</a>
   </div>
   {% if recent_sessions %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Date</th><th>Template</th><th>Notes</th></tr></thead>
+      <thead><tr><th>Date</th><th>Template</th><th>Notes</th><th></th></tr></thead>
       <tbody>
         {% for sess in recent_sessions %}
         <tr>
           <td>{{ sess.date }}</td>
           <td>{{ sess.template.name if sess.template else "—" }}</td>
           <td>{{ sess.notes or "" }}</td>
+          <td class="actions">
+            <a href="/sessions/{{ sess.id }}" class="btn btn-sm">View</a>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -50,4 +66,65 @@
   </div>
   {% endif %}
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  const activityData = {{ weekly_activity | tojson }};
+  if (activityData.length === 0) return;
+
+  const style = getComputedStyle(document.documentElement);
+  const colorText     = style.getPropertyValue("--color-text").trim();
+  const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
+  const colorPrimary  = style.getPropertyValue("--color-primary").trim();
+  const colorDivider  = style.getPropertyValue("--color-divider").trim();
+
+  const ctx = document.getElementById("activityChart").getContext("2d");
+  new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: activityData.map(d => d.date),
+      datasets: [{
+        label: "Training Load (kg)",
+        data: activityData.map(d => d.load),
+        borderColor: colorPrimary,
+        backgroundColor: colorPrimary + "33",
+        borderWidth: 2.5,
+        pointBackgroundColor: colorPrimary,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        fill: true,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 700, easing: "easeOutQuart" },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: style.getPropertyValue("--color-surface-2").trim(),
+          titleColor: colorText,
+          bodyColor: colorMuted,
+          borderColor: style.getPropertyValue("--color-border").trim(),
+          borderWidth: 1,
+          padding: 10,
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: colorMuted, font: { size: 11 } },
+          grid: { color: colorDivider },
+        },
+        y: {
+          ticks: { color: colorMuted, font: { size: 11 }, stepSize: 1 },
+          grid: { color: colorDivider },
+          beginAtZero: true,
+        },
+      },
+    },
+  });
+})();
+</script>
 {% endblock %}
