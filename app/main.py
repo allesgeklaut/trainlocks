@@ -446,9 +446,22 @@ async def progression_data(exercise_id: int, db: Session = Depends(get_db)):
         sets = [s for s in sess.sets if s.exercise_id == exercise_id]
         if not sets:
             continue
-        # Treat missing weight as 1.0 so bodyweight sets contribute their rep count.
-        top_weight = max((s.weight if s.weight is not None else 1.0) for s in sets)
-        volume = sum((s.weight if s.weight is not None else 1.0) * s.reps for s in sets)
+        # Separate weighted sets from bodyweight-only sets.
+        weighted_sets = [s for s in sets if s.weight is not None]
+        bw_sets = [s for s in sets if s.weight is None and s.exercise.is_bodyweight]
+        
+        # For bodyweight-only sessions (no weight at all), still include them
+        # using total_reps as the primary metric.
+        if weighted_sets:
+            top_weight = max((s.weight or 0.0) for s in weighted_sets)
+            volume = sum((s.weight or 0.0) * s.reps for s in weighted_sets)
+        elif bw_sets:
+            # Bodyweight exercise with no added weight – use reps as metric.
+            top_weight = 0.0
+            volume = sum(s.reps for s in bw_sets)  # use volume column for total reps when BW
+        else:
+            continue
+        
         total_reps = sum(s.reps for s in sets)
         rows.append({
             "date": str(sess.date),

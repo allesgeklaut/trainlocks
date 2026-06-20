@@ -69,7 +69,7 @@ def test_load_calculations_with_varied_weights(client):
     assert row["total_reps"] == 24
 
 def test_bodyweight_no_weight_shows_rep_count(client):
-    """Body‑weight exercise with no weight should show rep count as load."""
+    """Body‑weight exercise with no weight should show rep count in volume and total_reps."""
     # Create body‑weight exercise.
     client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
     db = SessionLocal()
@@ -89,10 +89,10 @@ def test_bodyweight_no_weight_shows_rep_count(client):
     resp = client.get(f"/api/progression/{ex_id}")
     assert resp.status_code == 200
     data = resp.json()["data"]
-    # Bodyweight sets with no weight should appear with rep count as load.
+    # Bodyweight sets with no weight should appear with reps in volume and total_reps.
     assert len(data) == 1
     row = data[0]
-    assert row["top_weight"] == 1.0
+    assert row["top_weight"] == 0.0
     assert row["volume"] == 15.0
     assert row["total_reps"] == 15
 
