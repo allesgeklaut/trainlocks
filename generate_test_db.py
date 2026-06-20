@@ -21,20 +21,21 @@ from app.models import Exercise, WorkoutSession, SetEntry
 def create_test_database(output_path=None):
     """Create a test database with sample data."""
     
-    # If no output path provided, create temporary database file
+    # If no output path provided, default to tests/test_database.db
     if output_path is None:
-        temp_db_fd, temp_db_path = tempfile.mkstemp(suffix='.db', prefix='training_log_test_')
-        os.close(temp_db_fd)  # Close the file descriptor
-        print(f"Creating test database at: {temp_db_path}")
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        temp_db_path = os.path.join(script_dir, 'tests', 'test_database.db')
     else:
         temp_db_path = output_path
-        print(f"Creating test database at: {temp_db_path}")
+    
+    print(f"Creating test database at: {temp_db_path}")
     
     # Create engine and session
     engine = create_engine(f'sqlite:///{temp_db_path}')
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     
-    # Create tables
+    # Drop and recreate all tables to ensure clean state
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     
     # Create a session
@@ -64,16 +65,16 @@ def create_test_database(output_path=None):
         
         # Create sample sessions with data for testing progression calculations
         
-        # Session 1: Bench Press with varied weights
+        # Session 1: Bench Press + Push Ups (push day)
         session1_date = date.today() - timedelta(days=5)
         session1 = WorkoutSession(
             date=session1_date,
-            notes="Test session 1"
+            notes="Test session 1 - push day"
         )
         db.add(session1)
         db.flush()
         
-        # Add sets for bench press in session 1
+        # Bench Press sets
         set1_1 = SetEntry(
             session_id=session1.id,
             exercise_id=bench_press_id,
@@ -101,16 +102,35 @@ def create_test_database(output_path=None):
         )
         db.add(set1_3)
         
-        # Session 2: Squat with different weights
+        # Push Ups sets (bodyweight - should not appear in progression charts)
+        set1_4 = SetEntry(
+            session_id=session1.id,
+            exercise_id=push_ups_id,
+            set_number=1,
+            reps=20,
+            weight=None
+        )
+        db.add(set1_4)
+        
+        set1_5 = SetEntry(
+            session_id=session1.id,
+            exercise_id=push_ups_id,
+            set_number=2,
+            reps=15,
+            weight=None
+        )
+        db.add(set1_5)
+        
+        # Session 2: Squat + Deadlift (leg day)
         session2_date = date.today() - timedelta(days=3)
         session2 = WorkoutSession(
             date=session2_date,
-            notes="Test session 2"
+            notes="Test session 2 - leg day"
         )
         db.add(session2)
         db.flush()
         
-        # Add sets for squat in session 2
+        # Squat sets
         set2_1 = SetEntry(
             session_id=session2.id,
             exercise_id=squat_id,
@@ -129,7 +149,26 @@ def create_test_database(output_path=None):
         )
         db.add(set2_2)
         
-        # Session 3: Push Ups (bodyweight only - should not appear in progression)
+        # Deadlift sets
+        set2_3 = SetEntry(
+            session_id=session2.id,
+            exercise_id=deadlift_id,
+            set_number=1,
+            reps=5,
+            weight=140.0
+        )
+        db.add(set2_3)
+        
+        set2_4 = SetEntry(
+            session_id=session2.id,
+            exercise_id=deadlift_id,
+            set_number=2,
+            reps=5,
+            weight=150.0
+        )
+        db.add(set2_4)
+        
+        # Session 3: Push Ups only (bodyweight day - should not appear in progression)
         session3_date = date.today() - timedelta(days=1)
         session3 = WorkoutSession(
             date=session3_date,
@@ -138,26 +177,34 @@ def create_test_database(output_path=None):
         db.add(session3)
         db.flush()
         
-        # Add sets for push ups in session 3 (no weight)
         set3_1 = SetEntry(
             session_id=session3.id,
             exercise_id=push_ups_id,
             set_number=1,
-            reps=15,
+            reps=25,
             weight=None
         )
         db.add(set3_1)
         
-        # Session 4: Deadlift with varied weights
+        set3_2 = SetEntry(
+            session_id=session3.id,
+            exercise_id=push_ups_id,
+            set_number=2,
+            reps=20,
+            weight=None
+        )
+        db.add(set3_2)
+        
+        # Session 4: Deadlift + Bench Press (heavy day)
         session4_date = date.today() - timedelta(days=2)
         session4 = WorkoutSession(
             date=session4_date,
-            notes="Test deadlift session"
+            notes="Test deadlift + bench session"
         )
         db.add(session4)
         db.flush()
         
-        # Add sets for deadlift in session 4
+        # Deadlift sets
         set4_1 = SetEntry(
             session_id=session4.id,
             exercise_id=deadlift_id,
@@ -184,6 +231,25 @@ def create_test_database(output_path=None):
             weight=170.0
         )
         db.add(set4_3)
+        
+        # Bench Press sets
+        set4_4 = SetEntry(
+            session_id=session4.id,
+            exercise_id=bench_press_id,
+            set_number=1,
+            reps=8,
+            weight=60.0
+        )
+        db.add(set4_4)
+        
+        set4_5 = SetEntry(
+            session_id=session4.id,
+            exercise_id=bench_press_id,
+            set_number=2,
+            reps=6,
+            weight=70.0
+        )
+        db.add(set4_5)
         
         db.commit()
         print("Test database created successfully with sample data")
