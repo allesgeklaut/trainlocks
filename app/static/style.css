@@ -233,8 +233,13 @@ textarea {
   font-size: var(--text-base);
 }
 
+.sidebar-logo img,
 .sidebar-logo svg {
   flex-shrink: 0;
+}
+
+.sidebar-logo img {
+  border-radius: var(--radius-sm);
 }
 
 .sidebar-logo .logo-accent {
