@@ -52,7 +52,20 @@
 {% endif %}
 
 <div style="margin-top:var(--space-4)">
-  <a href="/sessions/edit/{{ session.id }}" class="btn btn-primary">Edit</a>
-  <a href="/sessions" class="btn btn-secondary" style="margin-left:var(--space-3)">Back to Sessions</a>
+   <a href="/sessions/edit/{{ session.id }}" class="btn btn-primary">Edit</a>
+   <button id="back-btn" class="btn btn-secondary" style="margin-left:var(--space-3)">Back</button>
+   <script>
+     (function() {
+       var backBtn = document.getElementById("back-btn");
+       var referrer = document.referrer;
+       // Navigate to referrer if it's a valid internal URL (not empty and not this page)
+       if (referrer && referrer.indexOf(window.location.origin) === 0 && referrer !== window.location.href) {
+         backBtn.addEventListener("click", function() { window.history.back(); });
+       } else {
+         backBtn.innerHTML = "Back to Sessions";
+         backBtn.addEventListener("click", function() { window.location.href = "/sessions"; });
+       }
+     })();
+   </script>
 </div>
 {% endblock %}

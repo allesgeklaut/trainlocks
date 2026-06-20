@@ -45,11 +45,11 @@
       <thead><tr><th>Date</th><th>Template</th><th>Notes</th><th></th></tr></thead>
       <tbody>
         {% for sess in recent_sessions %}
-        <tr>
+        <tr style="cursor: pointer;" onclick="window.location.href='/sessions/{{ sess.id }}'">
           <td>{{ sess.date }}</td>
           <td>{{ sess.template.name if sess.template else "—" }}</td>
           <td>{{ sess.notes or "" }}</td>
-          <td class="actions">
+          <td class="actions" onclick="event.stopPropagation();">
             <a href="/sessions/{{ sess.id }}" class="btn btn-sm">View</a>
           </td>
         </tr>
