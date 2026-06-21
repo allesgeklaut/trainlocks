@@ -7,7 +7,7 @@ from typing import Generator, Optional
 import httpx
 import json
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -42,6 +42,7 @@ if use_test_db:
 
 # 3. Now import local application modules (which will now pick up the correct DATABASE_URL)
 from . import models
+from .auth import get_current_user, create_session_cookie, verify_password, COOKIE_NAME, SESSION_MAX_AGE
 from .database import Base, SessionLocal, engine
 
 Base.metadata.create_all(bind=engine)
@@ -78,8 +79,46 @@ async def fetch_exercise_db() -> list:
 
 # ── PAGES ────────────────────────────────────────────────────────────────────
 
+# ── AUTH ─────────────────────────────────────────────────────────────────────
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse(request, "login.html", {"error": None})
+
+
+@app.post("/login")
+async def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    user = db.query(models.User).filter(models.User.username == username).first()
+    if not user or not verify_password(password, user.hashed_password):
+        return templates.TemplateResponse(request, "login.html", {"error": "Invalid credentials"})
+    
+    response = RedirectResponse(url="/", status_code=303)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=create_session_cookie(user.id),
+        httponly=True,
+        max_age=SESSION_MAX_AGE,
+        samesite="lax",
+    )
+    return response
+
+
+@app.get("/logout")
+async def logout(tl_session: Optional[str] = Cookie(default=None)):
+    response = RedirectResponse(url="/login", status_code=303)
+    response.delete_cookie(key=COOKIE_NAME)
+    return response
+
+
+# ── PAGES ────────────────────────────────────────────────────────────────────
+
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request, db: Session = Depends(get_db)):
+async def index(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sessions = db.query(models.WorkoutSession).order_by(models.WorkoutSession.date.desc()).limit(5).all()
     exercises = db.query(models.Exercise).all()
     templates_db = db.query(models.SessionTemplate).all()
@@ -114,19 +153,21 @@ async def index(request: Request, db: Session = Depends(get_db)):
         "template_count": len(templates_db),
         "session_count": db.query(models.WorkoutSession).count(),
         "weekly_activity": weekly_data,
+        "user": user,
     })
 
 
 @app.get("/exercises", response_class=HTMLResponse)
-async def list_exercises(request: Request, db: Session = Depends(get_db)):
+async def list_exercises(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
-    return templates.TemplateResponse(request, "exercises.html", {"exercises": exercises})
+    return templates.TemplateResponse(request, "exercises.html", {"exercises": exercises, "user": user})
 
 
 @app.post("/exercises")
 async def create_exercise(
     name: str = Form(...),
     is_bodyweight: Optional[str] = Form(None),
+    user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     existing = db.query(models.Exercise).filter(models.Exercise.name == name.strip()).first()
@@ -139,7 +180,7 @@ async def create_exercise(
 
 
 @app.post("/exercises/{exercise_id}/delete")
-async def delete_exercise(exercise_id: int, db: Session = Depends(get_db)):
+async def delete_exercise(exercise_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     ex = db.query(models.Exercise).get(exercise_id)
     if not ex:
         raise HTTPException(status_code=404)
@@ -149,16 +190,16 @@ async def delete_exercise(exercise_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/templates", response_class=HTMLResponse)
-async def list_templates(request: Request, db: Session = Depends(get_db)):
+async def list_templates(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     templates_db = db.query(models.SessionTemplate).order_by(models.SessionTemplate.name).all()
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
     return templates.TemplateResponse(request, "templates.html", {
-        "templates": templates_db, "exercises": exercises
+        "templates": templates_db, "exercises": exercises, "user": user
     })
 
 
 @app.post("/templates")
-async def create_template(name: str = Form(...), db: Session = Depends(get_db)):
+async def create_template(name: str = Form(...), user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     if db.query(models.SessionTemplate).filter(models.SessionTemplate.name == name.strip()).first():
         raise HTTPException(status_code=400, detail="Template already exists")
     tpl = models.SessionTemplate(name=name.strip())
@@ -172,6 +213,7 @@ async def add_exercise_to_template(
     template_id: int,
     exercise_id: int = Form(...),
     sets: int = Form(...),
+    user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     tpl = db.query(models.SessionTemplate).get(template_id)
@@ -188,7 +230,7 @@ async def add_exercise_to_template(
 
 
 @app.post("/templates/{template_id}/remove_exercise/{te_id}")
-async def remove_template_exercise(template_id: int, te_id: int, db: Session = Depends(get_db)):
+async def remove_template_exercise(template_id: int, te_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     te = db.query(models.SessionTemplateExercise).get(te_id)
     if te:
         db.delete(te)
@@ -197,7 +239,7 @@ async def remove_template_exercise(template_id: int, te_id: int, db: Session = D
 
 
 @app.post("/templates/{template_id}/delete")
-async def delete_template(template_id: int, db: Session = Depends(get_db)):
+async def delete_template(template_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     tpl = db.query(models.SessionTemplate).get(template_id)
     if tpl:
         db.delete(tpl)
@@ -206,23 +248,23 @@ async def delete_template(template_id: int, db: Session = Depends(get_db)):
 
 
 @app.get("/sessions", response_class=HTMLResponse)
-async def list_sessions(request: Request, db: Session = Depends(get_db)):
+async def list_sessions(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sessions = db.query(models.WorkoutSession).order_by(models.WorkoutSession.date.desc()).all()
-    return templates.TemplateResponse(request, "sessions.html", {"sessions": sessions})
+    return templates.TemplateResponse(request, "sessions.html", {"sessions": sessions, "user": user})
 
 
 @app.get("/sessions/new", response_class=HTMLResponse)
-async def new_session(request: Request, template_id: Optional[int] = None, db: Session = Depends(get_db)):
+async def new_session(request: Request, user: models.User = Depends(get_current_user), template_id: Optional[int] = None, db: Session = Depends(get_db)):
     templates_db = db.query(models.SessionTemplate).order_by(models.SessionTemplate.name).all()
     selected_template = db.query(models.SessionTemplate).get(template_id) if template_id else None
     return templates.TemplateResponse(request, "new_session.html", {
         "templates": templates_db,
-        "selected_template": selected_template, "today": date.today(),
+        "selected_template": selected_template, "today": date.today(), "user": user,
     })
 
 
 @app.post("/sessions/new")
-async def create_session(request: Request, db: Session = Depends(get_db)):
+async def create_session(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     form = await request.form()
     date_str = form.get("date")
     if not date_str:
@@ -296,14 +338,14 @@ async def create_session(request: Request, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @app.get("/sessions/{session_id}", response_class=HTMLResponse)
-async def view_session(session_id: int, request: Request, db: Session = Depends(get_db)):
+async def view_session(session_id: int, request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sess = db.get(models.WorkoutSession, session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
-    return templates.TemplateResponse(request, "view_session.html", {"session": sess})
+    return templates.TemplateResponse(request, "view_session.html", {"session": sess, "user": user})
 
 @app.post("/sessions/{session_id}/delete")
-async def delete_session(session_id: int, db: Session = Depends(get_db)):
+async def delete_session(session_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sess = db.get(models.WorkoutSession, session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -312,7 +354,7 @@ async def delete_session(session_id: int, db: Session = Depends(get_db)):
     return RedirectResponse(url="/sessions", status_code=303)
 
 @app.get("/sessions/edit/{session_id}", response_class=HTMLResponse)
-async def edit_session_form(session_id: int, request: Request, db: Session = Depends(get_db)):
+async def edit_session_form(session_id: int, request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sess = db.get(models.WorkoutSession, session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -356,7 +398,7 @@ async def edit_session_form(session_id: int, request: Request, db: Session = Dep
     })
 
 @app.post("/sessions/edit/{session_id}")
-async def edit_session(session_id: int, request: Request, db: Session = Depends(get_db)):
+async def edit_session(session_id: int, request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sess = db.get(models.WorkoutSession, session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -422,18 +464,18 @@ async def edit_session(session_id: int, request: Request, db: Session = Depends(
 
 
 @app.get("/progression", response_class=HTMLResponse)
-async def progression(request: Request, exercise_id: Optional[int] = None, db: Session = Depends(get_db)):
+async def progression(request: Request, user: models.User = Depends(get_current_user), exercise_id: Optional[int] = None, db: Session = Depends(get_db)):
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
     selected_exercise = db.query(models.Exercise).get(exercise_id) if exercise_id else None
     return templates.TemplateResponse(request, "progression.html", {
-        "exercises": exercises, "selected_exercise": selected_exercise,
+        "exercises": exercises, "selected_exercise": selected_exercise, "user": user,
     })
 
 
 # ── JSON API for chart data ───────────────────────────────────────────────────
 
 @app.get("/api/progression/{exercise_id}")
-async def progression_data(exercise_id: int, db: Session = Depends(get_db)):
+async def progression_data(exercise_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sessions = (
         db.query(models.WorkoutSession)
         .join(models.SetEntry)
@@ -476,7 +518,7 @@ async def progression_data(exercise_id: int, db: Session = Depends(get_db)):
 
 @app.get("/browse/exercises", response_class=HTMLResponse)
 async def browse_exercises(
-    request: Request,
+    request: Request, user: models.User = Depends(get_current_user),
     q: str = "",
     category: str = "",
     muscle: str = "",
@@ -519,12 +561,12 @@ async def browse_exercises(
         "all_levels": all_levels,
         "q": q, "category": category, "muscle": muscle,
         "equipment": equipment, "level": level,
-        "error": error,
+        "error": error, "user": user,
     })
 
 
 @app.post("/browse/exercises/import")
-async def import_exercises(request: Request, db: Session = Depends(get_db)):
+async def import_exercises(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     form = await request.form()
     names = form.getlist("exercise_names")
     bw_set = set(form.getlist("bw_names"))
@@ -543,7 +585,7 @@ async def import_exercises(request: Request, db: Session = Depends(get_db)):
 # ── BROWSE PLANS ─────────────────────────────────────────────────────────────
 
 @app.get("/browse/plans", response_class=HTMLResponse)
-async def browse_plans(request: Request, db: Session = Depends(get_db)):
+async def browse_plans(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     with open(STARTER_PLANS_PATH) as f:
         plans = json.load(f)
     existing_templates = {t.name for t in db.query(models.SessionTemplate).all()}
@@ -552,12 +594,14 @@ async def browse_plans(request: Request, db: Session = Depends(get_db)):
         "plans": plans,
         "existing_templates": existing_templates,
         "existing_exercises": existing_exercises,
+        "user": user,
     })
 
 
 @app.post("/browse/plans/import")
 async def import_plan(
     request: Request,
+    user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     form = await request.form()

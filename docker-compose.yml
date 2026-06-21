@@ -8,6 +8,9 @@ services:
     # Bind mount so the database file is visible in the repository.
     volumes:
       - ./training_log_data:/data
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=sqlite:////data/training_log.db
+      - SECRET_KEY=${SECRET_KEY}
 
