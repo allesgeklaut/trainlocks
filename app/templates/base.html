@@ -92,6 +92,14 @@
       Training Plans
     </a>
 
+    {% if user %}
+    <div class="nav-section-label" style="margin-top: var(--space-4);">Account</div>
+    <div class="sidebar-user">
+      <span class="sidebar-username">{{ user.username }}</span>
+      <a href="/logout" class="sidebar-logout">Sign out</a>
+    </div>
+    {% endif %}
+
     <div class="sidebar-footer">
       <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
