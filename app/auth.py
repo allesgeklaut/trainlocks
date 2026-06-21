@@ -3,9 +3,9 @@ import os
 from datetime import timedelta
 from typing import Optional
 
+import bcrypt
 from fastapi import Cookie, Depends, HTTPException, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from . import models
@@ -15,18 +15,17 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production-please")
 SESSION_MAX_AGE = int(os.environ.get("SESSION_MAX_AGE", 60 * 60 * 24 * 7))  # 7 days
 COOKIE_NAME = "tl_session"
 
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 _signer = URLSafeTimedSerializer(SECRET_KEY)
 
 
 # ── Password helpers ──────────────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:
-    return _pwd.hash(plain)
+    return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
 
 
 # ── Session cookie helpers ────────────────────────────────────────────────
