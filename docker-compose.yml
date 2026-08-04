@@ -4,7 +4,7 @@ services:
     container_name: training-log
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8004:8000"
     # Bind mount so the database file is visible in the repository.
     volumes:
       - ./training_log_data:/data
