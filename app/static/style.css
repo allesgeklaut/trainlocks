@@ -353,19 +353,7 @@ textarea {
   position: relative;
 }
 
-/* blinking cursor effect on page titles */
-.page-title::after {
-  content: '█';
-  animation: blink-cursor 1s step-end infinite;
-  color: var(--color-primary);
-  margin-left: 4px;
-  font-weight: 400;
-}
-
-@keyframes blink-cursor {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
+/* page title — no cursor animation */
 
 .page-subtitle {
   color: var(--color-text-muted);
@@ -774,22 +762,106 @@ table tbody tr:hover {
   font-family: var(--font-mono);
 }
 
-/* ── Responsive ────────────────────────────────────────────────────────── */
+/* ── Mobile top bar ─────────────────────────────────────────────── */
+.mobile-topbar {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  height: 52px;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) 0 var(--space-2);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 1px 6px #00000030;
+}
+
+.menu-toggle {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  border: none;
+  color: var(--color-text);
+  align-items: center;
+  justify-content: center;
+}
+
+.menu-toggle:hover {
+  color: var(--color-primary);
+}
+
+.menu-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.topbar-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: var(--text-base);
+}
+
+.topbar-title img {
+  border-radius: var(--radius-sm);
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 99;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.sidebar-overlay.visible {
+  display: block;
+  opacity: 1;
+}
+
 @media (max-width: 768px) {
   body {
     grid-template-columns: 1fr;
   }
 
+  .mobile-topbar {
+    display: flex;
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+  }
+
+  .sidebar-overlay {
+    top: 52px;
+  }
+
   .sidebar {
     position: fixed;
+    top: 52px;
     left: -100%;
     width: var(--sidebar-w);
-    z-index: 100;
+    height: calc(100dvh - 52px);
+    z-index: 150;
     transition: left 0.3s;
   }
 
   .sidebar.open {
     left: 0;
+  }
+
+  .main {
+    padding-top: calc(52px + var(--space-4));
   }
 
   .kpi-grid {

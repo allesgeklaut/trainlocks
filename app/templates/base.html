@@ -23,13 +23,24 @@
     });
   </script>
 
+  <!-- Mobile top bar -->
+  <header class="mobile-topbar">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="6" x2="21" y2="6" />
+        <line x1="3" y1="12" x2="21" y2="12" />
+        <line x1="3" y1="18" x2="21" y2="18" />
+      </svg>
+    </button>
+    <a href="/" class="topbar-title">
+      <img src="/static/favicon.svg" alt="" width="20" height="20" />
+      trainlocks
+    </a>
+  </header>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
   <!-- Sidebar -->
   <nav class="sidebar" id="sidebar" aria-label="Main navigation">
-    <a href="/" class="sidebar-logo" aria-label="Training Log home">
-      <img src="/static/favicon.svg" alt="Training Log" width="28" height="28" />
-      Training Log
-    </a>
-
     {% set path = request.url.path %}
     <a href="/" class="nav-link {% if path == '/' %}active{% endif %}">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -100,16 +111,6 @@
     </div>
     {% endif %}
 
-    <div class="sidebar-footer">
-      <button class="theme-toggle" data-theme-toggle aria-label="Toggle theme">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="5" />
-          <path
-            d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-        </svg>
-        Toggle theme
-      </button>
-    </div>
   </nav>
 
   <main class="main" id="main-content">
@@ -118,14 +119,39 @@
 
   <script>
     (function () {
-      const t = document.querySelector("[data-theme-toggle]");
       const r = document.documentElement;
       let d = matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light";
       r.setAttribute("data-theme", d);
-      if (t) t.addEventListener("click", () => {
-        d = d === "dark" ? "light" : "dark";
-        r.setAttribute("data-theme", d);
-      });
+    })();
+
+    // ── Mobile sidebar toggle ────────────────────────────────────────────
+    (function () {
+      const toggle = document.getElementById('menu-toggle');
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebar-overlay');
+
+      function openMenu() {
+        sidebar.classList.add('open');
+        overlay.classList.add('visible');
+        toggle.setAttribute('aria-expanded', 'true');
+      }
+      function closeMenu() {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('visible');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+      function toggleMenu() {
+        sidebar.classList.contains('open') ? closeMenu() : openMenu();
+      }
+
+      if (toggle && sidebar && overlay) {
+        toggle.addEventListener('click', toggleMenu);
+        overlay.addEventListener('click', closeMenu);
+        // Close menu when a nav link is tapped
+        sidebar.querySelectorAll('.nav-link').forEach(link => {
+          link.addEventListener('click', closeMenu);
+        });
+      }
     })();
   </script>
   {% block scripts %}{% endblock %}

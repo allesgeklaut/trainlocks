@@ -15,11 +15,18 @@ FastAPI + SQLite strength training log with progression charts.
 
 ## Run with Docker Compose (recommended)
 
-    docker compose up -d
+1. Generate a secret key and create a `.env` file:
 
-Open http://localhost:8000
+       python -c "import secrets; print('SECRET_KEY=' + secrets.token_hex(32))" > .env
 
-Data is persisted in a named Docker volume (`training_log_data`).
+2. Build and start the container:
+
+       docker compose up -d
+
+3. Open http://localhost:8004 (port `8004` is mapped by default; adjust the
+   `ports` section in `docker-compose.yml` if needed).
+
+Data is persisted in a bind-mounted volume at `./training_log_data/`.
 
 ## Run locally without Docker (using uv)
 
@@ -53,11 +60,32 @@ The app uses session-based login (bcrypt passwords, signed cookies).
 
 ### First-time setup — create your user
 
-```bash
-# Locally
-uv run python seed_user.py johannes yourpassword
+**Option A — Locally with `uv` (recommended):**
 
-# In Docker (after starting the container)
+The seed script lives at the repository root, not inside the Docker image.
+If you run it without a `DATABASE_URL`, it writes to `./training_log.db` in
+the project directory — **not** the database the container uses
+(`./training_log_data/training_log.db`).  To seed the correct database:
+
+```bash
+# Run from the project root, pointing at the container's bind-mounted DB
+DATABASE_URL=sqlite:///./training_log_data/training_log.db \
+  uv run python seed_user.py johannes yourpassword
+```
+
+You can then remove the stray local database if one was created:
+
+```bash
+rm -f ./training_log.db
+```
+
+**Option B — Inside the container:**
+
+The default `Dockerfile` does **not** copy `seed_user.py` into the image.
+To use this method, add `COPY seed_user.py ./` to the Dockerfile, rebuild,
+and then:
+
+```bash
 docker exec -it training-log python seed_user.py johannes yourpassword
 ```
 
