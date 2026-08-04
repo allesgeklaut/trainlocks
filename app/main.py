@@ -102,13 +102,14 @@ async def login(
         key=COOKIE_NAME,
         value=create_session_cookie(user.id),
         httponly=True,
+        secure=True,
         max_age=SESSION_MAX_AGE,
         samesite="lax",
     )
     return response
 
 
-@app.get("/logout")
+@app.post("/logout")
 async def logout(tl_session: Optional[str] = Cookie(default=None)):
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(key=COOKIE_NAME)

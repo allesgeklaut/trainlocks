@@ -107,7 +107,9 @@
     <div class="nav-section-label" style="margin-top: var(--space-4);">Account</div>
     <div class="sidebar-user">
       <span class="sidebar-username">{{ user.username }}</span>
-      <a href="/logout" class="sidebar-logout">Sign out</a>
+      <form method="post" action="/logout" style="display:inline">
+        <button type="submit" class="sidebar-logout">Sign out</button>
+      </form>
     </div>
     {% endif %}
 
