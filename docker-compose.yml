@@ -11,8 +11,7 @@ services:
     volumes:
       - ./training_log_data:/data
     env_file:
-      - .env
+      - /opt/secrets/trainlocks.env
     environment:
       - DATABASE_URL=sqlite:////data/training_log.db
-      - SECRET_KEY=${SECRET_KEY}
 
