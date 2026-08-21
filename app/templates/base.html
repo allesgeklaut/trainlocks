@@ -130,21 +130,6 @@
       r.setAttribute("data-theme", d);
     })();
 
-    // ── Collapsible notes: show "more" only when the text actually wraps ──
-    (function () {
-      function checkNotes() {
-        document.querySelectorAll('.notes-cell .notes-text').forEach(function (el) {
-          if (el.parentElement.classList.contains('checked')) return;
-          if (el.scrollHeight > el.clientHeight + 1) {
-            el.classList.add('is-clamped');
-          }
-          el.parentElement.classList.add('checked');
-        });
-      }
-      document.addEventListener('DOMContentLoaded', checkNotes);
-      window.addEventListener('load', checkNotes);
-    })();
-
     // ── Mobile sidebar toggle ────────────────────────────────────────────
     (function () {
       const toggle = document.getElementById('menu-toggle');
