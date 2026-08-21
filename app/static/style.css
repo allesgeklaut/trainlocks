@@ -795,14 +795,74 @@ table tbody tr:hover {
   line-clamp: unset;
 }
 .notes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   font-size: var(--text-xs);
-  color: var(--color-primary);
+  color: var(--color-text-muted);
   margin-left: var(--space-2);
   white-space: nowrap;
-  display: none;
+  vertical-align: bottom;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-interactive), color var(--transition-interactive);
 }
-.notes-cell .notes-text.is-clamped + .notes-toggle {
-  display: inline;
+.notes-cell:hover .notes-toggle,
+.notes-cell.expanded .notes-toggle {
+  opacity: 1;
+}
+.notes-toggle:hover {
+  color: var(--color-primary);
+}
+.notes-toggle svg {
+  width: 12px;
+  height: 12px;
+  transition: transform var(--transition-interactive);
+}
+.notes-cell.expanded .notes-toggle svg {
+  transform: rotate(180deg);
+}
+
+/* ── Icon buttons in tables ─────────────────────────────────────────────── */
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  color: var(--color-primary);
+  letter-spacing: 0.02em;
+  transition: all var(--transition-interactive);
+  min-width: 32px;
+  min-height: 32px;
+}
+.btn-icon svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+.btn-icon:hover {
+  background: var(--color-surface-offset);
+  color: var(--color-primary-hover);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-glow);
+}
+.btn-icon.btn-icon-danger {
+  color: var(--color-error);
+}
+.btn-icon.btn-icon-danger:hover {
+  color: var(--color-error);
+  border-color: var(--color-error);
+  background: oklch(from var(--color-error) l c h / 0.08);
+  box-shadow: 0 0 8px var(--color-error)30;
 }
 
 /* ── Mobile top bar ─────────────────────────────────────────────── */

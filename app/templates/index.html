@@ -50,10 +50,10 @@
           <td>{{ sess.template.name if sess.template else "—" }}</td>
           <td class="notes-cell" onclick="event.stopPropagation()">
             <span class="notes-text">{{ sess.notes or "" }}</span>
-            <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');this.textContent=this.parentElement.classList.contains('expanded')?'less':'more';">more</a>
+            <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
           </td>
           <td class="actions" onclick="event.stopPropagation();">
-            <a href="/sessions/{{ sess.id }}" class="btn btn-sm">View</a>
+            <a href="/sessions/{{ sess.id }}" class="btn-icon" title="View"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
           </td>
         </tr>
         {% endfor %}
