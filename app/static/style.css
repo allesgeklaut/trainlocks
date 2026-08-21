@@ -687,6 +687,20 @@ table tbody tr:hover {
 .sets-grid input {
   max-width: 100%;
 }
+
+/* ── Ghost row (empty placeholder for the next set) ─────────────────────── */
+.sets-grid .ghost-row {
+  opacity: 0.4;
+}
+.sets-grid .ghost-row.set-num {
+  color: var(--color-text-faint);
+}
+.sets-grid input.ghost-row {
+  color: var(--color-text-faint);
+}
+.sets-grid input.ghost-row:focus {
+  opacity: 1;
+}
 .set-remove-btn {
   color: var(--color-error);
   background: oklch(from var(--color-error) l c h / 0.06);

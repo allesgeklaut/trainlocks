@@ -64,6 +64,14 @@
         value="{{ es.weight if es and es.weight is not none else '' }}" />
       {% endif %}
       {% endfor %}
+      {% set ghost = te.sets + 1 %}
+      <div class="set-num ghost-row">{{ ghost }}</div>
+      <input type="number" class="ghost-row" name="reps-{{ ex_id }}-{{ ghost }}" min="0" placeholder="0" />
+      {% if is_bw %}
+      <input type="number" step="0.5" class="ghost-row" name="weight-{{ ex_id }}-{{ ghost }}" min="0" placeholder="Added kg" />
+      {% else %}
+      <input type="number" step="0.5" class="ghost-row" name="weight-{{ ex_id }}-{{ ghost }}" min="0" placeholder="kg" />
+      {% endif %}
     </div>
   </div>
   {% endfor %}
@@ -74,4 +82,52 @@
   </div>
 </form>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // Ghost-row promotion: when a user types into the last (ghost) row of an
+  // exercise block, mark it as a real row and append a fresh ghost row below.
+  document.querySelectorAll('.exercise-block').forEach(function (block) {
+    var grid = block.querySelector('.sets-grid');
+
+    function nextSetNum() {
+      var max = 0;
+      grid.querySelectorAll('input[name^="reps-"]').forEach(function (input) {
+        var m = input.name.match(/reps-\d+-(\d+)/);
+        if (m) { var n = parseInt(m[1], 10); if (n > max) max = n; }
+      });
+      return max + 1;
+    }
+
+    function isGhostRow(el) { return el.classList && el.classList.contains('ghost-row'); }
+
+    grid.addEventListener('input', function (e) {
+      if (!isGhostRow(e.target)) return;
+      var t = e.target;
+      if (!t.value) return;
+      // Promote the whole ghost row.
+      block.querySelectorAll('.ghost-row').forEach(function (el) { el.classList.remove('ghost-row'); });
+      // Append a fresh ghost row.
+      var exId = block.dataset.exId;
+      var isBw = grid.querySelector('input[name^="weight-"]').placeholder === 'Added kg';
+      var n = nextSetNum();
+      var numDiv = document.createElement('div');
+      numDiv.className = 'set-num ghost-row';
+      numDiv.textContent = n.toString();
+      var reps = document.createElement('input');
+      reps.type = 'number'; reps.min = '0'; reps.placeholder = '0';
+      reps.className = 'ghost-row'; reps.name = 'reps-' + exId + '-' + n;
+      var wt = document.createElement('input');
+      wt.type = 'number'; wt.step = '0.5'; wt.min = '0';
+      wt.placeholder = isBw ? 'Added kg' : 'kg';
+      wt.className = 'ghost-row'; wt.name = 'weight-' + exId + '-' + n;
+      grid.appendChild(numDiv);
+      grid.appendChild(reps);
+      grid.appendChild(wt);
+    });
+  });
+})();
+</script>
 {% endblock %}
