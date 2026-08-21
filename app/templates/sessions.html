@@ -25,7 +25,10 @@
         <tr style="cursor: pointer;" onclick="window.location.href='/sessions/{{ sess.id }}'">
           <td>{{ sess.date }}</td>
           <td>{{ sess.template.name if sess.template else "—" }}</td>
-          <td>{{ sess.notes or "" }}</td>
+          <td class="notes-cell" onclick="event.stopPropagation()">
+            <span class="notes-text">{{ sess.notes or "" }}</span>
+            <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');this.textContent=this.parentElement.classList.contains('expanded')?'less':'more';">more</a>
+          </td>
           <td class="actions" onclick="event.stopPropagation();">
             <a href="/sessions/{{ sess.id }}" class="btn btn-sm">View</a>
             <a href="/sessions/edit/{{ sess.id }}" class="btn btn-sm">Edit</a>
