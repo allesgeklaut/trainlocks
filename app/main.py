@@ -1,4 +1,5 @@
 import os
+import time
 import argparse
 import tempfile
 import shutil
@@ -49,6 +50,10 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Training Log Dashboard")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+# Cache-buster for static assets: bumps on every app startup so proxies and
+# browsers re-fetch CSS/JS after a rebuild.
+STATIC_VERSION = str(int(time.time()))
+templates.env.globals["static_version"] = STATIC_VERSION
 
 FREE_EXERCISE_DB_URL = (
     "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json"

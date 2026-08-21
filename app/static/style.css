@@ -776,6 +776,35 @@ table tbody tr:hover {
   font-family: var(--font-mono);
 }
 
+/* ── Collapsible notes cell ─────────────────────────────────────────────── */
+.notes-cell {
+  max-width: 320px;
+  cursor: text;
+}
+.notes-cell .notes-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+}
+.notes-cell.expanded .notes-text {
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+}
+.notes-toggle {
+  font-size: var(--text-xs);
+  color: var(--color-primary);
+  margin-left: var(--space-2);
+  white-space: nowrap;
+  display: none;
+}
+.notes-cell .notes-text.is-clamped + .notes-toggle {
+  display: inline;
+}
+
 /* ── Mobile top bar ─────────────────────────────────────────────── */
 .mobile-topbar {
   display: none;
