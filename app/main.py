@@ -182,7 +182,7 @@ async def create_exercise(
 
 @app.post("/exercises/{exercise_id}/delete")
 async def delete_exercise(exercise_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    ex = db.query(models.Exercise).get(exercise_id)
+    ex = db.get(models.Exercise, exercise_id)
     if not ex:
         raise HTTPException(status_code=404)
     db.delete(ex)
@@ -217,7 +217,7 @@ async def add_exercise_to_template(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    tpl = db.query(models.SessionTemplate).get(template_id)
+    tpl = db.get(models.SessionTemplate, template_id)
     if not tpl:
         raise HTTPException(status_code=404)
     max_order = max((te.order for te in tpl.exercises), default=0)
@@ -232,7 +232,7 @@ async def add_exercise_to_template(
 
 @app.post("/templates/{template_id}/remove_exercise/{te_id}")
 async def remove_template_exercise(template_id: int, te_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    te = db.query(models.SessionTemplateExercise).get(te_id)
+    te = db.get(models.SessionTemplateExercise, te_id)
     if te:
         db.delete(te)
         db.commit()
@@ -241,7 +241,7 @@ async def remove_template_exercise(template_id: int, te_id: int, user: models.Us
 
 @app.post("/templates/{template_id}/delete")
 async def delete_template(template_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    tpl = db.query(models.SessionTemplate).get(template_id)
+    tpl = db.get(models.SessionTemplate, template_id)
     if tpl:
         db.delete(tpl)
         db.commit()
@@ -257,7 +257,7 @@ async def list_sessions(request: Request, user: models.User = Depends(get_curren
 @app.get("/sessions/new", response_class=HTMLResponse)
 async def new_session(request: Request, user: models.User = Depends(get_current_user), template_id: Optional[int] = None, db: Session = Depends(get_db)):
     templates_db = db.query(models.SessionTemplate).order_by(models.SessionTemplate.name).all()
-    selected_template = db.query(models.SessionTemplate).get(template_id) if template_id else None
+    selected_template = db.get(models.SessionTemplate, template_id) if template_id else None
     return templates.TemplateResponse(request, "new_session.html", {
         "templates": templates_db,
         "selected_template": selected_template, "today": date.today(), "user": user,
@@ -272,7 +272,7 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
         raise HTTPException(status_code=400, detail="Date required")
     
     template_id = int(form["template_id"]) if form.get("template_id") else None
-    template = db.query(models.SessionTemplate).get(template_id) if template_id else None
+    template = db.get(models.SessionTemplate, template_id) if template_id else None
     
     workout = models.WorkoutSession(
         date=date.fromisoformat(date_str),
@@ -281,20 +281,9 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
     )
     db.add(workout)
     db.flush()
-    
-    # If a template was selected, create SetEntry rows for all template exercises/sets.
-    if template:
-        for te in template.exercises:
-            for set_num in range(1, te.sets + 1):
-                db.add(models.SetEntry(
-                    session_id=workout.id,
-                    exercise_id=te.exercise_id,
-                    set_number=set_num,
-                    reps=0,
-                    weight=None,
-                ))
-    
-    # Update rows with user-submitted values.
+
+    # Persist only sets the user actually filled in. Template exercises that
+    # were left blank are not stored, so they won't show up as 0-rep rows.
     for key, value in form.items():
         if not key.startswith("reps-"):
             continue
@@ -302,35 +291,30 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
             _, ex_id_str, set_num_str = key.split("-")
             ex_id = int(ex_id_str)
             set_num = int(set_num_str)
-            reps = int(value) if value else 0
         except (ValueError, IndexError):
             continue
-        
+
         weight_val = form.get(f"weight-{ex_id}-{set_num}")
+        try:
+            reps = int(value) if value else 0
+        except ValueError:
+            reps = 0
         try:
             weight = float(weight_val) if weight_val else None
         except ValueError:
             weight = None
-        
-        # Update existing row, or create if it doesn't exist (for non-template sessions).
-        existing = db.query(models.SetEntry).filter(
-            models.SetEntry.session_id == workout.id,
-            models.SetEntry.exercise_id == ex_id,
-            models.SetEntry.set_number == set_num,
-        ).first()
-        
-        if existing:
-            existing.reps = reps
-            existing.weight = weight
-        else:
-            db.add(models.SetEntry(
-                session_id=workout.id,
-                exercise_id=ex_id,
-                set_number=set_num,
-                reps=reps,
-                weight=weight,
-            ))
-    
+
+        if reps == 0 and weight is None:
+            continue
+
+        db.add(models.SetEntry(
+            session_id=workout.id,
+            exercise_id=ex_id,
+            set_number=set_num,
+            reps=reps,
+            weight=weight,
+        ))
+
     db.commit()
     return RedirectResponse(url="/sessions", status_code=303)
 
@@ -424,6 +408,12 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
             except (ValueError, IndexError):
                 continue
 
+    # Track which existing rows should be deleted (user emptied both fields).
+    existing_rows = db.query(models.SetEntry).filter(
+        models.SetEntry.session_id == session_id
+    ).all()
+    rows_by_key = {(r.exercise_id, r.set_number): r for r in existing_rows}
+
     # Upsert submitted rows.
     for ex_id, set_num in submitted_pairs:
         reps_val = form.get(f"reps-{ex_id}-{set_num}", "")
@@ -439,19 +429,17 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
         except ValueError:
             weight = None
 
-        # Look up the existing row.
-        existing = db.query(models.SetEntry).filter(
-            models.SetEntry.session_id == session_id,
-            models.SetEntry.exercise_id == ex_id,
-            models.SetEntry.set_number == set_num,
-        ).first()
+        existing = rows_by_key.get((ex_id, set_num))
+
+        if reps == 0 and weight is None:
+            if existing:
+                db.delete(existing)
+            continue
 
         if existing:
-            # Update existing.
             existing.reps = reps
             existing.weight = weight
         else:
-            # Create new.
             db.add(models.SetEntry(
                 session_id=session_id,
                 exercise_id=ex_id,
@@ -467,7 +455,7 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
 @app.get("/progression", response_class=HTMLResponse)
 async def progression(request: Request, user: models.User = Depends(get_current_user), exercise_id: Optional[int] = None, db: Session = Depends(get_db)):
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
-    selected_exercise = db.query(models.Exercise).get(exercise_id) if exercise_id else None
+    selected_exercise = db.get(models.Exercise, exercise_id) if exercise_id else None
     return templates.TemplateResponse(request, "progression.html", {
         "exercises": exercises, "selected_exercise": selected_exercise, "user": user,
     })

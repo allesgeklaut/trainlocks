@@ -15,12 +15,22 @@ os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
 from app.main import app
 from app.database import Base, SessionLocal, engine
 from app import models
+from app.auth import COOKIE_NAME, create_session_cookie
 
 @pytest.fixture(scope="function")
 def client():
     # Create tables for the test database.
     Base.metadata.create_all(bind=engine)
+    # Seed a user and build a signed session cookie so authenticated
+    # endpoints don't redirect to /login.
+    db = SessionLocal()
+    if not db.query(models.User).filter_by(username="tester").first():
+        db.add(models.User(username="tester",
+                           hashed_password="$2b$12$" + "x" * 53))
+        db.commit()
+    cookie = create_session_cookie(1)
     with TestClient(app) as c:
+        c.cookies.set(COOKIE_NAME, cookie)
         yield c
     # Drop tables after tests.
     Base.metadata.drop_all(bind=engine)
@@ -251,3 +261,111 @@ def test_edit_session_adds_new_set(client):
     assert s2 is not None
     assert s2.reps == 10
     assert s2.weight == 210.0
+
+
+def test_template_session_skips_unfilled_exercises(client):
+    """When logging from a template, exercises the user left blank should not
+    create 0-rep / None-weight rows in the database."""
+    # Create two exercises.
+    client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
+    client.post("/exercises", data={"name": "Rows", "is_bodyweight": "0"})
+    db = SessionLocal()
+    bench = db.query(models.Exercise).filter_by(name="Bench Press").first()
+    rows = db.query(models.Exercise).filter_by(name="Rows").first()
+
+    # Create a template with both exercises, 3 sets each.
+    client.post("/templates", data={"name": "Upper A"})
+    tpl = db.query(models.SessionTemplate).filter_by(name="Upper A").first()
+    client.post(f"/templates/{tpl.id}/add_exercise",
+                data={"exercise_id": bench.id, "sets": 3})
+    client.post(f"/templates/{tpl.id}/add_exercise",
+                data={"exercise_id": rows.id, "sets": 3})
+
+    # Submit a session from the template: fill in Bench sets 1 & 2, leave
+    # Bench set 3 and all Rows sets empty (browser sends blank values).
+    payload = {
+        "date": date.today().isoformat(),
+        "template_id": str(tpl.id),
+        "notes": "",
+        f"reps-{bench.id}-1": "10",
+        f"weight-{bench.id}-1": "50",
+        f"reps-{bench.id}-2": "8",
+        f"weight-{bench.id}-2": "60",
+        f"reps-{bench.id}-3": "",
+        f"weight-{bench.id}-3": "",
+        f"reps-{rows.id}-1": "",
+        f"weight-{rows.id}-1": "",
+        f"reps-{rows.id}-2": "",
+        f"weight-{rows.id}-2": "",
+        f"reps-{rows.id}-3": "",
+        f"weight-{rows.id}-3": "",
+        # Ghost row (set 4) left blank for bench too.
+        f"reps-{bench.id}-4": "",
+        f"weight-{bench.id}-4": "",
+    }
+    resp = client.post("/sessions/new", data=payload)
+    assert resp.status_code == 200  # follows redirect to /sessions
+
+    sess = db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()).first()
+    sets = db.query(models.SetEntry).filter(models.SetEntry.session_id == sess.id).all()
+    # Only the two filled-in Bench sets should exist — no 0-rep phantoms.
+    assert len(sets) == 2
+    bench_sets = sorted(
+        db.query(models.SetEntry).filter(
+            models.SetEntry.session_id == sess.id,
+            models.SetEntry.exercise_id == bench.id
+        ).all(), key=lambda s: s.set_number)
+    assert [s.set_number for s in bench_sets] == [1, 2]
+    assert bench_sets[0].reps == 10 and bench_sets[0].weight == 50.0
+    assert bench_sets[1].reps == 8 and bench_sets[1].weight == 60.0
+    # No Rows sets at all.
+    assert db.query(models.SetEntry).filter(
+        models.SetEntry.session_id == sess.id,
+        models.SetEntry.exercise_id == rows.id
+    ).count() == 0
+
+
+def test_edit_session_deletes_emptied_set(client):
+    """When editing a session, clearing both reps and weight of an existing
+    set should delete that row rather than leaving a 0-rep phantom behind."""
+    # Create exercise and session with 2 filled sets.
+    client.post("/exercises", data={"name": "OHP", "is_bodyweight": "0"})
+    db = SessionLocal()
+    ex = db.query(models.Exercise).filter_by(name="OHP").first()
+    ex_id = ex.id
+
+    payload = {
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "10",
+        f"weight-{ex_id}-1": "40",
+        f"reps-{ex_id}-2": "8",
+        f"weight-{ex_id}-2": "45",
+    }
+    client.post("/sessions/new", data=payload)
+
+    sess = db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()).first()
+    session_id = sess.id
+    assert db.query(models.SetEntry).filter(
+        models.SetEntry.session_id == session_id).count() == 2
+
+    # Edit: keep set 1, blank out set 2 (browser sends empty strings).
+    edit_payload = {
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "10",
+        f"weight-{ex_id}-1": "40",
+        f"reps-{ex_id}-2": "",
+        f"weight-{ex_id}-2": "",
+    }
+    resp = client.post(f"/sessions/edit/{session_id}", data=edit_payload)
+    assert resp.status_code == 200
+
+    # Only set 1 should remain; set 2 should be deleted, not a 0-rep phantom.
+    db.expire_all()
+    sets = db.query(models.SetEntry).filter(
+        models.SetEntry.session_id == session_id).all()
+    assert len(sets) == 1
+    assert sets[0].set_number == 1
+    assert sets[0].reps == 10
+    assert sets[0].weight == 40.0

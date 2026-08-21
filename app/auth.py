@@ -58,7 +58,7 @@ def get_current_user(
     if tl_session:
         user_id = decode_session_cookie(tl_session)
         if user_id:
-            user = db.query(models.User).get(user_id)
+            user = db.get(models.User, user_id)
             if user:
                 return user
     raise HTTPException(
@@ -75,5 +75,5 @@ def get_current_user_optional(
     if tl_session:
         user_id = decode_session_cookie(tl_session)
         if user_id:
-            return db.query(models.User).get(user_id)
+            return db.get(models.User, user_id)
     return None

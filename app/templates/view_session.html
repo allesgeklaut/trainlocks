@@ -54,6 +54,10 @@
 <div style="margin-top:var(--space-4)">
    <a href="/sessions/edit/{{ session.id }}" class="btn btn-primary">Edit</a>
    <button id="back-btn" class="btn btn-secondary" style="margin-left:var(--space-3)">Back</button>
+   <form method="post" action="/sessions/{{ session.id }}/delete" style="display:inline; margin-left:var(--space-3);"
+     onsubmit="return confirm('Delete this session?');">
+     <button type="submit" class="btn btn-danger">Delete</button>
+   </form>
    <script>
      (function() {
        var backBtn = document.getElementById("back-btn");
