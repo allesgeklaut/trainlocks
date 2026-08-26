@@ -1,19 +1,11 @@
-import os
-import tempfile
 from datetime import date
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.auth import hash_password, verify_password
 
-# Create a temporary database for testing
-test_db_fd, test_db_path = tempfile.mkstemp(suffix=".db")
-os.close(test_db_fd)
-os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
-
-# Import after setting env var so that the engine is created correctly.
+# DATABASE_URL is set by conftest.py before the app is imported.
 from app.main import app
 from app.database import Base, SessionLocal, engine
 from app import models
@@ -36,14 +28,6 @@ def client():
         yield c
     # Drop tables after tests.
     Base.metadata.drop_all(bind=engine)
-
-def teardown_module():
-    """Clean up the test database file after all tests."""
-    if os.path.exists(test_db_path):
-        try:
-            os.remove(test_db_path)
-        except OSError:
-            pass
 
 def test_load_calculations_with_varied_weights(client):
     """Create a session with multiple sets of different weights and verify
