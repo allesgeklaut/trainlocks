@@ -367,7 +367,8 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
     db.commit()
     # API clients (e.g. MCP server) get the new session id as JSON; the
     # browser UI keeps the redirect flow.
-    if request.headers.get("accept", "").startswith("application/json"):
+    accept = request.headers.get("accept", "").lower()
+    if "application/json" in accept:
         return JSONResponse(
             {
                 "id": workout.id,

@@ -58,9 +58,17 @@ def _seed(client):
     return bench.id, pull.id, tpl.id, resp
 
 
-def test_unauthenticated_api_redirects_to_login():
+def test_unauthenticated_api_returns_json_401():
     with TestClient(app) as anon:
         resp = anon.get("/api/sessions", follow_redirects=False)
+    assert resp.status_code == 401
+    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.json()["detail"] == "Not authenticated"
+
+
+def test_unauthenticated_page_still_redirects_to_login():
+    with TestClient(app) as anon:
+        resp = anon.get("/sessions", follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/login"
 
