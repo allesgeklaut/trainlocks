@@ -384,6 +384,7 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
         "templates": [],
         "selected_template": dummy_template,
         "today": sess.date,
+        "notes": sess.notes,
         "session_id": session_id,
         "existing_sets": {(se.exercise_id, se.set_number): se for se in sess.sets},
     })
