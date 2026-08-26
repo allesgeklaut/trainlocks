@@ -438,6 +438,66 @@ def test_edit_form_with_gapped_set_numbers_preserves_all_sets(client):
     assert s3.reps == 6 and s3.weight == 60.0
 
 
+# ── Edit form offers un-logged template exercises ─────────────────────────
+
+def test_edit_form_offers_template_exercises_not_yet_logged(client):
+    """When a session was logged from a template but only some of its
+    exercises were filled in, the edit form must still show the remaining
+    template exercises (with just a ghost row) so they can be added later."""
+    client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
+    client.post("/exercises", data={"name": "Rows", "is_bodyweight": "0"})
+    client.post("/templates", data={"name": "Push Day"})
+    db = SessionLocal()
+    bench = db.query(models.Exercise).filter_by(name="Bench Press").first()
+    row = db.query(models.Exercise).filter_by(name="Rows").first()
+    tpl = db.query(models.SessionTemplate).filter_by(name="Push Day").first()
+    bench_id, row_id, tpl_id = bench.id, row.id, tpl.id
+    db.close()
+
+    client.post(f"/templates/{tpl_id}/add_exercise",
+                data={"exercise_id": bench_id, "sets": 3})
+    client.post(f"/templates/{tpl_id}/add_exercise",
+                data={"exercise_id": row_id, "sets": 2})
+
+    # Log only Bench Press from the template.
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": str(tpl_id),
+        f"reps-{bench_id}-1": "10", f"weight-{bench_id}-1": "50",
+    })
+    db = SessionLocal()
+    session_id = db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc()).first().id
+    db.close()
+
+    html = client.get(f"/sessions/edit/{session_id}").text
+    # Bench shows its real set 1 plus the ghost row.
+    assert f'name="reps-{bench_id}-1"' in html
+    assert f'class="ghost-row" name="reps-{bench_id}-2"' in html
+    # Rows was not logged yet: it must appear with only a ghost row (1),
+    # no fabricated set rows.
+    assert f'class="ghost-row" name="reps-{row_id}-1"' in html
+    assert f'name="reps-{row_id}-2"' not in html
+    # Template order: Bench (1.) before Rows (2.).
+    assert html.index("1. Bench Press") < html.index("2. Rows")
+
+    # Add a Rows set through the form (as if typed into the ghost row).
+    client.post(f"/sessions/edit/{session_id}", data={
+        "date": date.today().isoformat(),
+        "template_id": str(tpl_id),
+        f"reps-{bench_id}-1": "10", f"weight-{bench_id}-1": "50",
+        f"reps-{row_id}-1": "8",  f"weight-{row_id}-1": "40",
+    })
+    db = SessionLocal()
+    row_sets = db.query(models.SetEntry).filter_by(exercise_id=row_id).all()
+    assert len(row_sets) == 1
+    assert row_sets[0].set_number == 1
+    assert row_sets[0].reps == 8 and row_sets[0].weight == 40.0
+    bench_sets = db.query(models.SetEntry).filter_by(exercise_id=bench_id).all()
+    assert len(bench_sets) == 1 and bench_sets[0].reps == 10
+    db.close()
+
+
 # ── Progression: weight-less sets on a weighted exercise ───────────────────
 
 def test_progression_includes_weightless_session_on_weighted_exercise(client):
