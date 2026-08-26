@@ -389,30 +389,44 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
             self.id = template_id
             self.exercises = exercises
 
-    # Group sets by exercise and order exercises by their earliest set.
+    # Group sets by exercise.
     sets_by_exercise: dict[int, list[models.SetEntry]] = {}
-    order_counter = 1
-    exercise_order: dict[int, int] = {}
-    for se in sorted(sess.sets, key=lambda s: s.set_number):
-        if se.exercise_id not in sets_by_exercise:
-            sets_by_exercise[se.exercise_id] = []
-            exercise_order[se.exercise_id] = order_counter
-            order_counter += 1
-        sets_by_exercise[se.exercise_id].append(se)
+    for se in sess.sets:
+        sets_by_exercise.setdefault(se.exercise_id, []).append(se)
+
+    def make_dummy(exercise, set_numbers, order):
+        return type("DummyTE", (), {
+            "exercise": exercise,
+            "sets": len(set_numbers),
+            "set_numbers": set_numbers,
+            "order": order,
+        })()
 
     dummy_exercises = []
-    for ex_id, ex_sets in sets_by_exercise.items():
-        # Render one row per actual set_number (they may have gaps after a
-        # middle set was deleted), plus one blank row so new sets can be
-        # added. Renumbering here would shift data onto the wrong set.
-        set_numbers = sorted({s.set_number for s in ex_sets})
-        dummy_exercises.append(
-            type("DummyTE", (), {
-                "exercise": ex_sets[0].exercise,
-                "sets": len(set_numbers),
-                "set_numbers": set_numbers,
-                "order": exercise_order[ex_id],
-            })())
+    template = db.get(models.SessionTemplate, sess.template_id) if sess.template_id else None
+    if template:
+        # Show every template exercise (in template order) so exercises
+        # that were skipped when the session was logged can still be
+        # added here. Exercises without sets render only their ghost row.
+        for order_idx, te in enumerate(template.exercises, start=1):
+            ex_sets = sets_by_exercise.get(te.exercise_id, [])
+            set_numbers = sorted({s.set_number for s in ex_sets})
+            dummy_exercises.append(make_dummy(te.exercise, set_numbers, order_idx))
+    else:
+        # No template: fall back to the exercises that have sets, ordered
+        # by their earliest set.
+        first_seen: list[int] = []
+        for se in sorted(sess.sets, key=lambda s: s.set_number):
+            if se.exercise_id not in first_seen:
+                first_seen.append(se.exercise_id)
+        for order_idx, ex_id in enumerate(first_seen, start=1):
+            ex_sets = sets_by_exercise[ex_id]
+            # Render one row per actual set_number (they may have gaps
+            # after a middle set was deleted), plus one blank row so new
+            # sets can be added. Renumbering here would shift data onto
+            # the wrong set.
+            set_numbers = sorted({s.set_number for s in ex_sets})
+            dummy_exercises.append(make_dummy(ex_sets[0].exercise, set_numbers, order_idx))
     dummy_template = DummyTemplate(sess.template_id, dummy_exercises)
 
     return templates.TemplateResponse(request, "new_session.html", {

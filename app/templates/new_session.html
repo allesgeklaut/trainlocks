@@ -68,7 +68,7 @@
         value="{{ es.weight if es and es.weight is not none else '' }}" />
       {% endif %}
       {% endfor %}
-      {% set ghost = set_nums[-1] + 1 %}
+      {% set ghost = (set_nums[-1] + 1) if set_nums else 1 %}
       <div class="set-num ghost-row">{{ ghost }}</div>
       <input type="number" class="ghost-row" name="reps-{{ ex_id }}-{{ ghost }}" min="0" placeholder="0" />
       {% if is_bw %}
