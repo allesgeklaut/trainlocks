@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
+  <link rel="mask-icon" href="/static/favicon.svg" color="#cd7f32" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="trainlocks" />
+  <link rel="preconnect" href="https://api.fontshare.com" />
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&f[]=jetbrains-mono@400,500,600,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v={{ static_version }}" />
+</head>
+
+<body>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Only suppress Enter on multi-row logging forms (marked with
+      // data-suppress-enter); every other form (login, name fields, …)
+      // must keep Enter-to-submit working.
+      document.querySelectorAll('form[data-suppress-enter]').forEach(form => {
+        form.addEventListener('keydown', e => {
+          if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+            e.preventDefault();
+          }
+        });
+      });
+    });
+  </script>
+
+  <!-- Mobile top bar -->
+  <header class="mobile-topbar">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Toggle navigation" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="3" y1="6" x2="21" y2="6" />
+        <line x1="3" y1="12" x2="21" y2="12" />
+        <line x1="3" y1="18" x2="21" y2="18" />
+      </svg>
+    </button>
+    <a href="/" class="topbar-title">
+      <img src="/static/favicon.svg" alt="" width="20" height="20" />
+      trainlocks
+    </a>
+  </header>
+  <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+  <!-- Sidebar -->
+  <nav class="sidebar" id="sidebar" aria-label="Main navigation">
+    {% set path = request.url.path %}
+    <a href="/" class="nav-link {% if path == '/' %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="7" height="7" />
+        <rect x="14" y="3" width="7" height="7" />
+        <rect x="14" y="14" width="7" height="7" />
+        <rect x="3" y="14" width="7" height="7" />
+      </svg>
+      Dashboard
+    </a>
+    <a href="/exercises" class="nav-link {% if path.startswith('/exercises') %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+      </svg>
+      Exercises
+    </a>
+    <a href="/templates" class="nav-link {% if path.startswith('/templates') %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
+        <rect x="9" y="3" width="6" height="4" rx="1" />
+        <path d="M9 12h6M9 16h4" />
+      </svg>
+      Templates
+    </a>
+    <a href="/sessions/new" class="nav-link {% if path == '/sessions/new' %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 8v8M8 12h8" />
+      </svg>
+      Log Session
+    </a>
+    <a href="/sessions" class="nav-link {% if path == '/sessions' %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <path d="M16 2v4M8 2v4M3 10h18" />
+      </svg>
+      Sessions
+    </a>
+    <a href="/progression" class="nav-link {% if path.startswith('/progression') %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+      </svg>
+      Progression
+    </a>
+
+    <div class="nav-section-label">Discover</div>
+    <a href="/browse/exercises" class="nav-link {% if path.startswith('/browse/exercises') %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8" />
+        <path d="m21 21-4.35-4.35" />
+      </svg>
+      Browse Exercises
+    </a>
+    <a href="/browse/plans" class="nav-link {% if path.startswith('/browse/plans') %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      </svg>
+      Training Plans
+    </a>
+
+    {% if user %}
+    <div class="nav-section-label" style="margin-top: var(--space-4);">Account</div>
+    <div class="sidebar-user">
+      <span class="sidebar-username">{{ user.username }}</span>
+      <form method="post" action="/logout" style="display:inline">
+        <button type="submit" class="sidebar-logout">Sign out</button>
+      </form>
+    </div>
+    {% endif %}
+
+  </nav>
+
+  <main class="main" id="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    (function () {
+      const r = document.documentElement;
+      let d = matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light";
+      r.setAttribute("data-theme", d);
+    })();
+
+    // ── Mobile sidebar toggle ────────────────────────────────────────────
+    (function () {
+      const toggle = document.getElementById('menu-toggle');
+      const sidebar = document.getElementById('sidebar');
+      const overlay = document.getElementById('sidebar-overlay');
+
+      function openMenu() {
+        sidebar.classList.add('open');
+        overlay.classList.add('visible');
+        toggle.setAttribute('aria-expanded', 'true');
+      }
+      function closeMenu() {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('visible');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+      function toggleMenu() {
+        sidebar.classList.contains('open') ? closeMenu() : openMenu();
+      }
+
+      if (toggle && sidebar && overlay) {
+        toggle.addEventListener('click', toggleMenu);
+        overlay.addEventListener('click', closeMenu);
+        // Close menu when a nav link is tapped
+        sidebar.querySelectorAll('.nav-link').forEach(link => {
+          link.addEventListener('click', closeMenu);
+        });
+      }
+    })();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+
+</html>
