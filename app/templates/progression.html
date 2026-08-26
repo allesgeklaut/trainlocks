@@ -75,7 +75,9 @@
     document.getElementById("table-wrap").style.display = "";
     data.forEach(r => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${r.date}</td><td>${r.top_weight.toFixed(1)}</td><td>${r.volume.toFixed(1)}</td><td>${r.total_reps}</td>`;
+      const weight = r.has_weight ? r.top_weight.toFixed(1) : "—";
+      const volume = r.has_weight ? r.volume.toFixed(1) : "—";
+      tr.innerHTML = `<td>${r.date}</td><td>${weight}</td><td>${volume}</td><td>${r.total_reps}</td>`;
       tbody.appendChild(tr);
     });
   }
@@ -88,7 +90,10 @@
   const colorOrange   = style.getPropertyValue("--color-orange").trim();
   const colorDivider  = style.getPropertyValue("--color-divider").trim();
 
-  const labels = data.map(r => r.date);
+  // Charts only plot sessions that have a weight; the table above still
+  // lists weight-less sessions (marked with —) so they aren't silently gone.
+  const chartData = data.filter(r => r.has_weight);
+  const labels = chartData.map(r => r.date);
 
   const baseOptions = {
     responsive: true,
@@ -132,12 +137,12 @@
     data: {
       labels,
       datasets: [{
-        data: data.map(r => r.top_weight),
+        data: chartData.map(r => r.top_weight),
         borderColor: colorPrimary,
         backgroundColor: makeGradient(wCtx, colorPrimary),
         borderWidth: 2.5,
         pointBackgroundColor: colorPrimary,
-        pointRadius: data.length > 30 ? 2 : 4,
+        pointRadius: chartData.length > 30 ? 2 : 4,
         pointHoverRadius: 6,
         fill: true,
         tension: 0.35,
@@ -153,7 +158,7 @@
     data: {
       labels,
       datasets: [{
-        data: data.map(r => r.volume),
+        data: chartData.map(r => r.volume),
         backgroundColor: colorOrange + "cc",
         borderColor: colorOrange,
         borderWidth: 1.5,

@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from app.auth import hash_password, verify_password
+
 # Create a temporary database for testing
 test_db_fd, test_db_path = tempfile.mkstemp(suffix=".db")
 os.close(test_db_fd)
@@ -77,6 +79,7 @@ def test_load_calculations_with_varied_weights(client):
     # Volume: (50*10)+(60*8)+(70*6)=500+480+420=1400
     assert row["volume"] == 1400.0
     assert row["total_reps"] == 24
+    assert row["has_weight"] is True
 
 def test_bodyweight_no_weight_shows_rep_count(client):
     """Body‑weight exercise with no weight should show rep count in volume and total_reps."""
@@ -369,3 +372,196 @@ def test_edit_session_deletes_emptied_set(client):
     assert sets[0].set_number == 1
     assert sets[0].reps == 10
     assert sets[0].weight == 40.0
+
+
+# ── Gapped set numbers (middle set deleted) ──────────────────────────────
+
+def test_edit_form_with_gapped_set_numbers_preserves_all_sets(client):
+    """A session whose set numbers have a gap (middle set deleted) must render
+    a row for *each actual* set number, with the ghost row at max+1. A no-op
+    save must not delete the rows that sit 'after' the gap.
+
+    Previously the form rendered rows 1..len(distinct), so after deleting set 2
+    the form showed rows 1, 2 plus a ghost numbered 3 — the ghost collided with
+    real set 3 and a plain save silently deleted set 3's data."""
+    client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
+    db = SessionLocal()
+    ex = db.query(models.Exercise).filter_by(name="Bench Press").first()
+    ex_id = ex.id
+
+    payload = {
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "10", f"weight-{ex_id}-1": "50",
+        f"reps-{ex_id}-2": "8",  f"weight-{ex_id}-2": "55",
+        f"reps-{ex_id}-3": "6",  f"weight-{ex_id}-3": "60",
+    }
+    client.post("/sessions/new", data=payload)
+    session_id = db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc()).first().id
+
+    # Delete the middle set (2) via edit.
+    client.post(f"/sessions/edit/{session_id}", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "10", f"weight-{ex_id}-1": "50",
+        f"reps-{ex_id}-2": "",   f"weight-{ex_id}-2": "",
+        f"reps-{ex_id}-3": "6",  f"weight-{ex_id}-3": "60",
+    })
+    db.expire_all()
+    nums = sorted(s.set_number for s in db.query(models.SetEntry)
+                  .filter(models.SetEntry.session_id == session_id).all())
+    assert nums == [1, 3]
+
+    # Open the edit form: it must show rows for set 1 AND set 3, and the ghost
+    # row must be numbered 4 (max+1), not collide with the existing set 3.
+    html = client.get(f"/sessions/edit/{session_id}").text
+    assert f'name="reps-{ex_id}-1"' in html
+    assert f'name="reps-{ex_id}-3"' in html
+    assert f'name="reps-{ex_id}-4"' in html  # ghost row
+    assert f'name="reps-{ex_id}-2"' not in html  # no re-created gap row
+
+    # No-op save (resubmit the exact rows the form rendered, ghost blank) must
+    # not delete set 3.
+    client.post(f"/sessions/edit/{session_id}", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "10", f"weight-{ex_id}-1": "50",
+        f"reps-{ex_id}-3": "6",  f"weight-{ex_id}-3": "60",
+        f"reps-{ex_id}-4": "",   f"weight-{ex_id}-4": "",
+    })
+    db.expire_all()
+    remaining = db.query(models.SetEntry).filter(
+        models.SetEntry.session_id == session_id).all()
+    assert sorted(s.set_number for s in remaining) == [1, 3]
+    s3 = next(s for s in remaining if s.set_number == 3)
+    assert s3.reps == 6 and s3.weight == 60.0
+
+
+# ── Progression: weight-less sets on a weighted exercise ───────────────────
+
+def test_progression_includes_weightless_session_on_weighted_exercise(client):
+    """A weighted exercise logged with reps but no weight (weight forgotten)
+    should still appear in progression history, flagged has_weight=False so the
+    charts can exclude it — rather than vanishing silently."""
+    client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
+    db = SessionLocal()
+    ex = db.query(models.Exercise).filter_by(name="Bench Press").first()
+    ex_id = ex.id
+
+    payload = {
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "10",  # weight intentionally omitted
+    }
+    client.post("/sessions/new", data=payload)
+
+    resp = client.get(f"/api/progression/{ex_id}")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert len(data) == 1
+    row = data[0]
+    assert row["has_weight"] is False
+    assert row["top_weight"] == 0.0
+    assert row["volume"] == 0.0
+    assert row["total_reps"] == 10
+
+
+def test_progression_flagged_on_bodyweight_rows(client):
+    """Bodyweight rows (reps-as-metric) are chartable and must be flagged
+    has_weight=True."""
+    client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = db.query(models.Exercise).filter_by(name="Push Ups").first()
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "15",
+    })
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["has_weight"] is True
+    assert row["volume"] == 15.0
+
+
+# ── Deleting an in-use exercise ────────────────────────────────────────────
+
+def test_delete_exercise_used_in_session_is_rejected(client):
+    """Deleting an exercise that still has SetEntry rows must be refused (400)
+    so we don't orphan rows the UI can no longer address."""
+    client.post("/exercises", data={"name": "Squat", "is_bodyweight": "0"})
+    db = SessionLocal()
+    ex = db.query(models.Exercise).filter_by(name="Squat").first()
+    ex_id = ex.id
+
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "5", f"weight-{ex_id}-1": "100",
+    })
+
+    resp = client.post(f"/exercises/{ex_id}/delete")
+    assert resp.status_code == 400
+    db.expire_all()
+    assert db.query(models.Exercise).filter_by(id=ex_id).first() is not None
+
+
+def test_delete_exercise_used_in_template_is_rejected(client):
+    """Deleting an exercise referenced by a template must be refused (400)."""
+    client.post("/exercises", data={"name": "Rows", "is_bodyweight": "0"})
+    client.post("/templates", data={"name": "Pull Day"})
+    db = SessionLocal()
+    ex = db.query(models.Exercise).filter_by(name="Rows").first()
+    ex_id = ex.id
+    tpl = db.query(models.SessionTemplate).filter_by(name="Pull Day").first()
+    tpl_id = tpl.id
+
+    client.post(f"/templates/{tpl_id}/add_exercise",
+                data={"exercise_id": ex_id, "sets": 3})
+
+    resp = client.post(f"/exercises/{ex_id}/delete")
+    assert resp.status_code == 400
+    db.expire_all()
+    assert db.query(models.Exercise).filter_by(id=ex_id).first() is not None
+
+
+def test_delete_unused_exercise_succeeds(client):
+    """An exercise with no referencing rows still deletes fine."""
+    client.post("/exercises", data={"name": "Curls", "is_bodyweight": "0"})
+    db = SessionLocal()
+    ex = db.query(models.Exercise).filter_by(name="Curls").first()
+    ex_id = ex.id
+    resp = client.post(f"/exercises/{ex_id}/delete")
+    assert resp.status_code == 200
+    db.expire_all()
+    assert db.query(models.Exercise).filter_by(id=ex_id).first() is None
+
+
+# ── Input validation ───────────────────────────────────────────────────────
+
+def test_create_session_rejects_malformed_date(client):
+    resp = client.post("/sessions/new", data={"date": "13/13/2025", "template_id": ""})
+    assert resp.status_code == 400
+
+
+def test_create_session_rejects_malformed_template_id(client):
+    resp = client.post("/sessions/new", data={
+        "date": date.today().isoformat(), "template_id": "not-an-int"})
+    assert resp.status_code == 400
+
+
+def test_edit_session_rejects_malformed_date(client):
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(), "template_id": ""})
+    db = SessionLocal()
+    sess = db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc()).first()
+    resp = client.post(f"/sessions/edit/{sess.id}", data={"date": "garbage"})
+    assert resp.status_code == 400
+
+
+def test_verify_password_with_overlong_password_returns_false():
+    """bcrypt raises ValueError for passwords >72 bytes; verify_password must
+    convert that into a plain False instead of a 500."""
+    hashed = hash_password("real-password")
+    assert verify_password("x" * 100, hashed) is False
