@@ -351,7 +351,8 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
 
     # Build a dummy template structure for the form
     class DummyTemplate:
-        def __init__(self, exercises):
+        def __init__(self, template_id, exercises):
+            self.id = template_id
             self.exercises = exercises
 
     # Group sets by exercise and order exercises by their earliest set.
@@ -377,7 +378,7 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
                 "sets": set_count,
                 "order": exercise_order[ex_id],
             })())
-    dummy_template = DummyTemplate(dummy_exercises)
+    dummy_template = DummyTemplate(sess.template_id, dummy_exercises)
 
     return templates.TemplateResponse(request, "new_session.html", {
         "templates": [],
@@ -398,7 +399,8 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
     sess.date = date.fromisoformat(date_str)
-    sess.template_id = int(form["template_id"]) if form.get("template_id") else None
+    # Template is chosen at creation time and is not editable from here, so
+    # sess.template_id is intentionally left untouched.
     sess.notes = form.get("notes") or None
 
     # Collect all (exercise_id, set_number) tuples being submitted.
