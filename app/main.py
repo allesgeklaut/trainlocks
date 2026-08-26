@@ -59,6 +59,8 @@ FREE_EXERCISE_DB_URL = (
     "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json"
 )
 _exercise_db_cache: list = []
+_exercise_db_failed_at: float = 0.0
+_EXERCISE_DB_NEGATIVE_TTL = 60.0
 
 STARTER_PLANS_PATH = os.path.join(os.path.dirname(__file__), "static", "plans", "starter_plans.json")
 
@@ -72,14 +74,23 @@ def get_db() -> Generator[Session, None, None]:
 
 
 async def fetch_exercise_db() -> list:
-    global _exercise_db_cache
+    global _exercise_db_cache, _exercise_db_failed_at
     if _exercise_db_cache:
         return _exercise_db_cache
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.get(FREE_EXERCISE_DB_URL)
-        r.raise_for_status()
-        _exercise_db_cache = r.json()
-    return _exercise_db_cache
+    # Negative cache: if the fetch failed recently, fail fast instead of
+    # blocking every page load on the full HTTP timeout while offline.
+    if _exercise_db_failed_at and time.monotonic() - _exercise_db_failed_at < _EXERCISE_DB_NEGATIVE_TTL:
+        raise RuntimeError("Exercise database temporarily unavailable, retry shortly")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(FREE_EXERCISE_DB_URL)
+            r.raise_for_status()
+            data = r.json()
+    except Exception:
+        _exercise_db_failed_at = time.monotonic()
+        raise
+    _exercise_db_cache = data
+    return data
 
 
 # ── PAGES ────────────────────────────────────────────────────────────────────
@@ -190,6 +201,20 @@ async def delete_exercise(exercise_id: int, user: models.User = Depends(get_curr
     ex = db.get(models.Exercise, exercise_id)
     if not ex:
         raise HTTPException(status_code=404)
+    # Refuse to delete an exercise that still has rows referencing it. FK
+    # enforcement is off, so deleting here would orphan SetEntry /
+    # SessionTemplateExercise rows that the UI can no longer address.
+    referenced_by_sets = db.query(models.SetEntry).filter(
+        models.SetEntry.exercise_id == exercise_id
+    ).first()
+    referenced_by_templates = db.query(models.SessionTemplateExercise).filter(
+        models.SessionTemplateExercise.exercise_id == exercise_id
+    ).first()
+    if referenced_by_sets or referenced_by_templates:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete: exercise is used in sessions or templates",
+        )
     db.delete(ex)
     db.commit()
     return RedirectResponse(url="/exercises", status_code=303)
@@ -275,12 +300,21 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
     date_str = form.get("date")
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
-    
-    template_id = int(form["template_id"]) if form.get("template_id") else None
+    try:
+        workout_date = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date")
+
+    template_id = None
+    if form.get("template_id"):
+        try:
+            template_id = int(form["template_id"])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid template id")
     template = db.get(models.SessionTemplate, template_id) if template_id else None
-    
+
     workout = models.WorkoutSession(
-        date=date.fromisoformat(date_str),
+        date=workout_date,
         template_id=template_id,
         notes=form.get("notes") or None,
     )
@@ -357,7 +391,7 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
 
     # Group sets by exercise and order exercises by their earliest set.
     sets_by_exercise: dict[int, list[models.SetEntry]] = {}
-    order_counter = 0
+    order_counter = 1
     exercise_order: dict[int, int] = {}
     for se in sorted(sess.sets, key=lambda s: s.set_number):
         if se.exercise_id not in sets_by_exercise:
@@ -368,14 +402,15 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
 
     dummy_exercises = []
     for ex_id, ex_sets in sets_by_exercise.items():
-        # `sets` is the count of distinct set_numbers; we render one row per
-        # set plus one blank row so the "Add set" button has somewhere to start.
-        distinct_set_nums = {s.set_number for s in ex_sets}
-        set_count = len(distinct_set_nums)
+        # Render one row per actual set_number (they may have gaps after a
+        # middle set was deleted), plus one blank row so new sets can be
+        # added. Renumbering here would shift data onto the wrong set.
+        set_numbers = sorted({s.set_number for s in ex_sets})
         dummy_exercises.append(
             type("DummyTE", (), {
                 "exercise": ex_sets[0].exercise,
-                "sets": set_count,
+                "sets": len(set_numbers),
+                "set_numbers": set_numbers,
                 "order": exercise_order[ex_id],
             })())
     dummy_template = DummyTemplate(sess.template_id, dummy_exercises)
@@ -399,7 +434,10 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
     date_str = form.get("date")
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
-    sess.date = date.fromisoformat(date_str)
+    try:
+        sess.date = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date")
     # Template is chosen at creation time and is not editable from here, so
     # sess.template_id is intentionally left untouched.
     sess.notes = form.get("notes") or None
@@ -492,14 +530,21 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
         # For bodyweight-only sessions (no weight at all), still include them
         # using total_reps as the primary metric.
         if weighted_sets:
+            has_weight = True
             top_weight = max((s.weight or 0.0) for s in weighted_sets)
             volume = sum((s.weight or 0.0) * s.reps for s in weighted_sets)
         elif bw_sets:
             # Bodyweight exercise with no added weight – use reps as metric.
+            has_weight = True
             top_weight = 0.0
             volume = sum(s.reps for s in bw_sets)  # use volume column for total reps when BW
         else:
-            continue
+            # Weighted exercise whose sets were logged without a weight
+            # (e.g. weight forgotten). Keep the session visible in history
+            # but flag it so the charts can exclude it.
+            has_weight = False
+            top_weight = 0.0
+            volume = 0.0
         
         total_reps = sum(s.reps for s in sets)
         rows.append({
@@ -507,6 +552,7 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
             "top_weight": round(top_weight, 2),
             "volume": round(volume, 2),
             "total_reps": total_reps,
+            "has_weight": has_weight,
         })
     return JSONResponse({"data": rows})
 

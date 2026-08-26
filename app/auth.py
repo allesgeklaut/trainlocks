@@ -25,7 +25,12 @@ def hash_password(plain: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except (ValueError, TypeError):
+        # e.g. password longer than bcrypt's 72-byte limit, or a corrupted
+        # stored hash — treat as a simple mismatch, not a server error.
+        return False
 
 
 # ── Session cookie helpers ────────────────────────────────────────────────

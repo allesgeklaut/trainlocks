@@ -21,7 +21,8 @@
 {% endif %}
 
 {% if selected_template %}
-<form method="post" action="{{ '/sessions/edit/' + session_id|string if session_id else '/sessions/new' }}">
+<form id="session-form" method="post" data-suppress-enter
+  action="{{ '/sessions/edit/' + session_id|string if session_id else '/sessions/new' }}">
   {% if session_id %}
   <input type="hidden" name="session_id" value="{{ session_id }}" />
   {% endif %}
@@ -42,9 +43,11 @@
   {% for te in selected_template.exercises %}
   {% set ex_id = te.exercise.id %}
   {% set is_bw = te.exercise.is_bodyweight %}
-  <div class="exercise-block" data-ex-id="{{ ex_id }}" style="max-width:520px">
+  {% set set_nums = te.set_numbers if te.set_numbers is defined else range(1, te.sets + 1) %}
+  <div class="exercise-block" data-ex-id="{{ ex_id }}" data-name="{{ te.exercise.name }}"
+       data-weighted="{{ '1' if not is_bw else '0' }}" style="max-width:520px">
     <div class="exercise-block-title">
-      {{ te.order + 1 }}. {{ te.exercise.name }}
+      {{ te.order }}. {{ te.exercise.name }}
       {% if is_bw %}<span class="badge badge-bw">Bodyweight</span>{% else %}<span
         class="badge badge-weighted">Weighted</span>{% endif %}
     </div>
@@ -52,7 +55,7 @@
       <div class="col-header">Set</div>
       <div class="col-header">Reps</div>
       <div class="col-header">Weight (kg)</div>
-      {% for s in range(1, te.sets + 1) %}
+      {% for s in set_nums %}
       {% set es = existing_sets.get((ex_id, s)) if existing_sets else None %}
       <div class="set-num">{{ s }}</div>
       <input type="number" name="reps-{{ ex_id }}-{{ s }}" min="0" placeholder="0"
@@ -65,7 +68,7 @@
         value="{{ es.weight if es and es.weight is not none else '' }}" />
       {% endif %}
       {% endfor %}
-      {% set ghost = te.sets + 1 %}
+      {% set ghost = set_nums[-1] + 1 %}
       <div class="set-num ghost-row">{{ ghost }}</div>
       <input type="number" class="ghost-row" name="reps-{{ ex_id }}-{{ ghost }}" min="0" placeholder="0" />
       {% if is_bw %}
@@ -128,6 +131,32 @@
       grid.appendChild(reps);
       grid.appendChild(wt);
     });
+  });
+})();
+
+// Warn (but don't block) before saving when a weighted exercise has sets
+// with reps but no weight — the usual cause is a forgotten weight entry.
+(function () {
+  var form = document.getElementById('session-form');
+  if (!form) return;
+  form.addEventListener('submit', function (e) {
+    var missing = [];
+    document.querySelectorAll('.exercise-block[data-weighted="1"]').forEach(function (block) {
+      var exName = block.dataset.name;
+      block.querySelectorAll('input[name^="reps-"]').forEach(function (input) {
+        var reps = parseInt(input.value, 10);
+        if (!reps || reps <= 0) return;
+        var weightInput = block.querySelector(
+          'input[name="' + input.name.replace('reps-', 'weight-') + '"]');
+        if (!weightInput || weightInput.value === '') {
+          var m = input.name.match(/-(\d+)$/);
+          missing.push(exName + ' set ' + (m ? m[1] : '?'));
+        }
+      });
+    });
+    if (missing.length && !confirm('No weight entered for ' + missing.join(', ') + '. Save anyway?')) {
+      e.preventDefault();
+    }
   });
 })();
 </script>

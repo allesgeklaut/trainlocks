@@ -17,7 +17,10 @@
 <body>
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('form').forEach(form => {
+      // Only suppress Enter on multi-row logging forms (marked with
+      // data-suppress-enter); every other form (login, name fields, …)
+      // must keep Enter-to-submit working.
+      document.querySelectorAll('form[data-suppress-enter]').forEach(form => {
         form.addEventListener('keydown', e => {
           if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
             e.preventDefault();
