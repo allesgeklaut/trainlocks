@@ -1,0 +1,172 @@
+[
+  {
+    "id": "push_a",
+    "name": "Push A",
+    "description": "Chest, shoulders, triceps. Barbell-based.",
+    "exercises": [
+      {
+        "name": "Barbell Bench Press",
+        "sets": 4
+      },
+      {
+        "name": "Incline Dumbbell Press",
+        "sets": 3
+      },
+      {
+        "name": "Overhead Press",
+        "sets": 3
+      },
+      {
+        "name": "Lateral Raise",
+        "sets": 3
+      },
+      {
+        "name": "Tricep Dip",
+        "sets": 3
+      }
+    ]
+  },
+  {
+    "id": "pull_a",
+    "name": "Pull A",
+    "description": "Back and biceps. Barbell-based.",
+    "exercises": [
+      {
+        "name": "Barbell Deadlift",
+        "sets": 4
+      },
+      {
+        "name": "Barbell Row",
+        "sets": 4
+      },
+      {
+        "name": "Pull-Up",
+        "sets": 3
+      },
+      {
+        "name": "Face Pull",
+        "sets": 3
+      },
+      {
+        "name": "Barbell Curl",
+        "sets": 3
+      }
+    ]
+  },
+  {
+    "id": "legs_a",
+    "name": "Legs A",
+    "description": "Quad-dominant leg day.",
+    "exercises": [
+      {
+        "name": "Barbell Squat",
+        "sets": 4
+      },
+      {
+        "name": "Romanian Deadlift",
+        "sets": 3
+      },
+      {
+        "name": "Leg Press",
+        "sets": 3
+      },
+      {
+        "name": "Leg Curl",
+        "sets": 3
+      },
+      {
+        "name": "Standing Calf Raise",
+        "sets": 4
+      }
+    ]
+  },
+  {
+    "id": "upper_a",
+    "name": "Upper Body A",
+    "description": "Full upper body balanced session.",
+    "exercises": [
+      {
+        "name": "Barbell Bench Press",
+        "sets": 4
+      },
+      {
+        "name": "Barbell Row",
+        "sets": 4
+      },
+      {
+        "name": "Overhead Press",
+        "sets": 3
+      },
+      {
+        "name": "Pull-Up",
+        "sets": 3
+      },
+      {
+        "name": "Lateral Raise",
+        "sets": 3
+      },
+      {
+        "name": "Barbell Curl",
+        "sets": 2
+      }
+    ]
+  },
+  {
+    "id": "lower_a",
+    "name": "Lower Body A",
+    "description": "Full lower body session.",
+    "exercises": [
+      {
+        "name": "Barbell Squat",
+        "sets": 4
+      },
+      {
+        "name": "Romanian Deadlift",
+        "sets": 3
+      },
+      {
+        "name": "Bulgarian Split Squat",
+        "sets": 3
+      },
+      {
+        "name": "Leg Curl",
+        "sets": 3
+      },
+      {
+        "name": "Standing Calf Raise",
+        "sets": 4
+      }
+    ]
+  },
+  {
+    "id": "bodyweight_full",
+    "name": "Bodyweight Full Body",
+    "description": "No equipment needed.",
+    "exercises": [
+      {
+        "name": "Push-Up",
+        "sets": 4
+      },
+      {
+        "name": "Pull-Up",
+        "sets": 3
+      },
+      {
+        "name": "Bodyweight Squat",
+        "sets": 3
+      },
+      {
+        "name": "Dip",
+        "sets": 3
+      },
+      {
+        "name": "Lunge",
+        "sets": 3
+      },
+      {
+        "name": "Plank",
+        "sets": 3
+      }
+    ]
+  }
+]

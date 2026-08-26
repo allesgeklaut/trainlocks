@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Training Plans — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Training Plans</h1>
+  <p class="page-subtitle">Ready-made session templates — import directly into your library</p>
+</div>
+
+<div class="plans-grid">
+  {% for plan in plans %}
+  <div class="card plan-card">
+    <div class="plan-card-header">
+      <div>
+        <div class="plan-name">{{ plan.name }}</div>
+        <div class="plan-desc">{{ plan.description }}</div>
+      </div>
+      {% if plan.name in existing_templates %}
+      <span class="badge badge-bw" style="align-self:flex-start;flex-shrink:0">Imported</span>
+      {% endif %}
+    </div>
+
+    <ul class="plan-exercises">
+      {% for item in plan.exercises %}
+      <li>
+        <span class="plan-ex-name">{{ item.name }}</span>
+        <span class="plan-ex-sets">{{ item.sets }} sets</span>
+        {% if item.name not in existing_exercises %}
+        <span class="plan-ex-new">new exercise</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+
+    <form method="post" action="/browse/plans/import" style="margin-top:var(--space-4)">
+      <input type="hidden" name="plan_id" value="{{ plan.id }}" />
+      <button type="submit" class="btn btn-primary btn-sm"
+        {% if plan.name in existing_templates %}style="opacity:.5"{% endif %}>
+        {% if plan.name in existing_templates %}Import again{% else %}Import template{% endif %}
+      </button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

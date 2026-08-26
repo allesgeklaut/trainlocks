@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="trainlocks" />
+  <title>Login — Trainlocks</title>
+  <link rel="preconnect" href="https://api.fontshare.com" />
+  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v={{ static_version }}" />
+  <style>
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100dvh;
+      grid-template-columns: 1fr;
+      background: var(--color-bg);
+    }
+    .login-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-10) var(--space-10);
+      width: 100%;
+      max-width: 400px;
+      box-shadow: var(--shadow-md);
+    }
+    .login-logo {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-8);
+    }
+    .login-logo svg { color: var(--color-primary); }
+    .login-logo span { font-size: var(--text-lg); font-weight: 700; }
+    .login-title { font-size: var(--text-lg); font-weight: 700; margin-bottom: var(--space-2); }
+    .login-subtitle { font-size: var(--text-sm); color: var(--color-text-muted); margin-bottom: var(--space-6); }
+    .error-msg {
+      background: oklch(from var(--color-error) l c h / 0.1);
+      border: 1px solid var(--color-error);
+      color: var(--color-error);
+      border-radius: var(--radius-md);
+      padding: var(--space-3) var(--space-4);
+      font-size: var(--text-sm);
+      margin-bottom: var(--space-4);
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="/static/favicon.svg" alt="Trainlocks" width="28" height="28" />
+      <span>Trainlocks</span>
+    </div>
+
+    <div class="login-title">Welcome back</div>
+    <div class="login-subtitle">Sign in to your training dashboard</div>
+
+    {% if error %}
+    <div class="error-msg">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/login">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" autofocus required />
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;margin-top:var(--space-2)">
+        Sign in
+      </button>
+    </form>
+  </div>
+
+  <script>
+  (function(){
+    const r = document.documentElement;
+    const d = matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light";
+    r.setAttribute("data-theme", d);
+  })();
+  </script>
+</body>
+</html>
