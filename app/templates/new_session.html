@@ -6,18 +6,19 @@
   <p class="page-subtitle">Record your workout</p>
 </div>
 
+{% if not session_id %}
 <div class="card" style="max-width:520px">
   <div class="card-title">Select Template</div>
   <form method="get" action="/sessions/new">
     <select name="template_id" onchange="this.form.submit()" style="width:100%">
       <option value="">— choose template —</option>
       {% for tpl in templates %}
-      <option value="{{ tpl.id }}" {% if selected_template and tpl.id==selected_template.id %}selected{% endif %}>{{
-        tpl.name }}</option>
+      <option value="{{ tpl.id }}" {% if selected_template and tpl.id==selected_template.id %}selected{% endif %}>{{ tpl.name }}</option>
       {% endfor %}
     </select>
   </form>
 </div>
+{% endif %}
 
 {% if selected_template %}
 <form method="post" action="{{ '/sessions/edit/' + session_id|string if session_id else '/sessions/new' }}">
