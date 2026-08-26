@@ -4,7 +4,7 @@ from datetime import timedelta
 from typing import Optional
 
 import bcrypt
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy.orm import Session
 
@@ -57,6 +57,7 @@ def get_db():
 
 
 def get_current_user(
+    request: Request,
     tl_session: Optional[str] = Cookie(default=None),
     db: Session = Depends(get_db),
 ) -> models.User:
@@ -66,6 +67,13 @@ def get_current_user(
             user = db.get(models.User, user_id)
             if user:
                 return user
+    if request.url.path.startswith("/api/"):
+        # API clients get a JSON 401 so they can re-authenticate; browsers
+        # keep the redirect to the login page.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
     raise HTTPException(
         status_code=status.HTTP_303_SEE_OTHER,
         headers={"Location": "/login"},
