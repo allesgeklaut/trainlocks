@@ -114,6 +114,13 @@ async def login(
         return templates.TemplateResponse(request, "login.html", {"error": "Invalid credentials"})
     
     response = RedirectResponse(url="/", status_code=303)
+    # Behind Cloudflare Tunnel the origin connection is plain HTTP and the
+    # real client scheme arrives in X-Forwarded-Proto (set by cloudflared).
+    # Direct plain-HTTP clients (MCP client, localhost) send no such header.
+    served_over_tls = (
+        request.headers.get("x-forwarded-proto", "").lower() == "https"
+        or request.url.scheme == "https"
+    )
     response.set_cookie(
         key=COOKIE_NAME,
         value=create_session_cookie(user.id),
@@ -121,7 +128,7 @@ async def login(
         # Only mark Secure when actually served over TLS — a Secure cookie
         # over plain HTTP is ignored by strict cookie clients (browsers make
         # an exception for localhost origins, which masks this).
-        secure=request.url.scheme == "https",
+        secure=served_over_tls,
         max_age=SESSION_MAX_AGE,
         samesite="lax",
     )
