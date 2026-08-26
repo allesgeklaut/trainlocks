@@ -14,4 +14,11 @@ services:
       - /opt/secrets/trainlocks.env
     environment:
       - DATABASE_URL=sqlite:////data/training_log.db
+    networks:
+      - default
+      - stacks-shared
+networks:
+  default:
+  stacks-shared:
+    external: true
 
