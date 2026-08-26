@@ -8,7 +8,7 @@ from typing import Generator, Optional
 import httpx
 import json
 from dotenv import load_dotenv
-from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -118,7 +118,10 @@ async def login(
         key=COOKIE_NAME,
         value=create_session_cookie(user.id),
         httponly=True,
-        secure=True,
+        # Only mark Secure when actually served over TLS — a Secure cookie
+        # over plain HTTP is ignored by strict cookie clients (browsers make
+        # an exception for localhost origins, which masks this).
+        secure=request.url.scheme == "https",
         max_age=SESSION_MAX_AGE,
         samesite="lax",
     )
@@ -355,6 +358,17 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
         ))
 
     db.commit()
+    # API clients (e.g. MCP server) get the new session id as JSON; the
+    # browser UI keeps the redirect flow.
+    if request.headers.get("accept", "").startswith("application/json"):
+        return JSONResponse(
+            {
+                "id": workout.id,
+                "date": str(workout.date),
+                "template_id": workout.template_id,
+            },
+            status_code=201,
+        )
     return RedirectResponse(url="/sessions", status_code=303)
 
 # ---------------------------------------------------------------------------
@@ -569,6 +583,94 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
             "has_weight": has_weight,
         })
     return JSONResponse({"data": rows})
+
+
+@app.get("/api/exercises")
+async def api_list_exercises(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
+    return [
+        {"id": e.id, "name": e.name, "is_bodyweight": bool(e.is_bodyweight)}
+        for e in exercises
+    ]
+
+
+@app.get("/api/templates")
+async def api_list_templates(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    templates = db.query(models.SessionTemplate).order_by(models.SessionTemplate.name).all()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "exercises": [
+                {
+                    "exercise_id": te.exercise_id,
+                    "name": te.exercise.name,
+                    "sets": te.sets,
+                    "order": te.order,
+                }
+                for te in t.exercises
+            ],
+        }
+        for t in templates
+    ]
+
+
+@app.get("/api/sessions")
+async def api_list_sessions(
+    limit: int = Query(20, ge=1, le=500),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    sessions = (
+        db.query(models.WorkoutSession)
+        .order_by(models.WorkoutSession.date.desc(), models.WorkoutSession.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "date": str(s.date),
+            "template_id": s.template_id,
+            "template_name": s.template.name if s.template else None,
+            "notes": s.notes,
+        }
+        for s in sessions
+    ]
+
+
+@app.get("/api/sessions/{session_id}")
+async def api_get_session(
+    session_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    sess = db.get(models.WorkoutSession, session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="Session not found")
+    sets = (
+        db.query(models.SetEntry)
+        .filter(models.SetEntry.session_id == session_id)
+        .order_by(models.SetEntry.exercise_id, models.SetEntry.set_number)
+        .all()
+    )
+    return {
+        "id": sess.id,
+        "date": str(sess.date),
+        "template_id": sess.template_id,
+        "template_name": sess.template.name if sess.template else None,
+        "notes": sess.notes,
+        "sets": [
+            {
+                "exercise_id": s.exercise_id,
+                "exercise": s.exercise.name,
+                "set_number": s.set_number,
+                "reps": s.reps,
+                "weight": s.weight,
+            }
+            for s in sets
+        ],
+    }
 
 
 # ── BROWSE EXERCISES (free-exercise-db) ──────────────────────────────────────
