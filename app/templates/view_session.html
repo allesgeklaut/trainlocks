@@ -72,7 +72,10 @@
           <td>{{ a.distance_km ~ ' km' if a.distance_km is not none else '—' }}</td>
           <td>{{ a.duration_min ~ ' min' if a.duration_min is not none else '—' }}</td>
           <td>{{ _cardio_pace_display(a) }}</td>
-          <td>{{ a.notes or '—' }}</td>
+          <td class="notes-cell">
+            <span class="notes-text">{{ a.notes or "" }}</span>
+            <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
