@@ -59,7 +59,8 @@ Notes:
 
 - `/cardio` — log running, swimming and other endurance activities. Each entry
   stores activity type, distance (km), duration (minutes) and computes pace
-  (min/km). A session can mix strength sets and cardio on the same date.
+  (min/km, or min/100 m for swimming). A session can mix strength sets and
+  cardio on the same date.
 - Cardio is also exposed through the JSON API (`POST/GET/DELETE /api/cardio`)
   and the MCP server (`log_cardio`, `list_cardio`, `get_cardio`, `delete_cardio`).
 

@@ -23,7 +23,7 @@
 
 <div class="card">
   <div class="section-header">
-    <span class="section-title">Weekly Training Load (Last 12 Weeks)</span>
+    <span class="section-title">Weekly Load (Last 12 Weeks)</span>
   </div>
   {% if weekly_activity %}
   <div style="height:200px;position:relative;">
@@ -85,6 +85,7 @@
   const colorText     = style.getPropertyValue("--color-text").trim();
   const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
   const colorPrimary  = style.getPropertyValue("--color-primary").trim();
+  const colorBlue     = style.getPropertyValue("--color-blue").trim();
   const colorDivider  = style.getPropertyValue("--color-divider").trim();
 
   const ctx = document.getElementById("activityChart").getContext("2d");
@@ -93,8 +94,9 @@
     data: {
       labels: activityData.map(d => d.date),
       datasets: [{
-        label: "Training Load (kg)",
+        label: "Strength Load (kg)",
         data: activityData.map(d => d.load),
+        yAxisID: "y",
         borderColor: colorPrimary,
         backgroundColor: colorPrimary + "33",
         borderWidth: 2.5,
@@ -103,6 +105,19 @@
         pointHoverRadius: 6,
         fill: true,
         tension: 0.3,
+      }, {
+        label: "Cardio Distance (km)",
+        data: activityData.map(d => d.cardio_km),
+        yAxisID: "y1",
+        borderColor: colorBlue,
+        backgroundColor: colorBlue + "33",
+        borderWidth: 2,
+        borderDash: [5, 4],
+        pointBackgroundColor: colorBlue,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        fill: false,
+        tension: 0.3,
       }]
     },
     options: {
@@ -110,7 +125,7 @@
       maintainAspectRatio: false,
       animation: { duration: 700, easing: "easeOutQuart" },
       plugins: {
-        legend: { display: false },
+        legend: { display: true, labels: { color: colorMuted, boxWidth: 12, font: { size: 11 } } },
         tooltip: {
           backgroundColor: style.getPropertyValue("--color-surface-2").trim(),
           titleColor: colorText,
@@ -126,8 +141,16 @@
           grid: { color: colorDivider },
         },
         y: {
+          title: { display: true, text: "Strength (kg)", color: colorMuted, font: { size: 11 } },
           ticks: { color: colorMuted, font: { size: 11 }, stepSize: 1 },
           grid: { color: colorDivider },
+          beginAtZero: true,
+        },
+        y1: {
+          position: "right",
+          title: { display: true, text: "Cardio (km)", color: colorMuted, font: { size: 11 } },
+          ticks: { color: colorMuted, font: { size: 11 } },
+          grid: { drawOnChartArea: false },
           beginAtZero: true,
         },
       },

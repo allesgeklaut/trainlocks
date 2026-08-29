@@ -85,7 +85,7 @@ templates.env.globals["static_version"] = STATIC_VERSION
 
 
 def _cardio_pace_display(c) -> str:
-    """Human pace string for templates (e.g. '6:00 /km') or '—'."""
+    """Human pace string for templates (e.g. '6:00 /km', '2:00 /100m') or '—'."""
     p = _cardio_pace(c)
     if p is None:
         return "—"
@@ -94,7 +94,7 @@ def _cardio_pace_display(c) -> str:
     if s == 60:
         m += 1
         s = 0
-    return f"{m}:{s:02d} /km"
+    return f"{m}:{s:02d} /{_cardio_pace_unit(c)}"
 
 
 templates.env.globals["_cardio_pace_display"] = _cardio_pace_display
@@ -213,9 +213,32 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
             weight = set_entry.weight if set_entry.weight is not None else 1.0
             weekly_load[week_key] += weight * set_entry.reps
 
+    # Cardio load per ISO week: total distance (km) and duration (min)
+    cardio_activities = (
+        db.query(models.CardioActivity)
+        .join(models.WorkoutSession, models.CardioActivity.session_id == models.WorkoutSession.id)
+        .filter(models.WorkoutSession.date >= twelve_weeks_ago)
+        .all()
+    )
+    weekly_cardio_km = defaultdict(float)
+    weekly_cardio_min = defaultdict(float)
+    for a in cardio_activities:
+        iso = a.session.date.isocalendar()
+        week_key = f"{iso[0]}-W{iso[1]:02d}"
+        if a.distance_km:
+            weekly_cardio_km[week_key] += a.distance_km
+        if a.duration_min:
+            weekly_cardio_min[week_key] += a.duration_min
+
+    all_weeks = sorted(set(weekly_load) | set(weekly_cardio_km) | set(weekly_cardio_min))
     weekly_data = [
-        {"date": k, "load": round(v, 0)}
-        for k, v in sorted(weekly_load.items())
+        {
+            "date": k,
+            "load": round(weekly_load.get(k, 0.0), 0),
+            "cardio_km": round(weekly_cardio_km.get(k, 0.0), 2),
+            "cardio_min": round(weekly_cardio_min.get(k, 0.0), 0),
+        }
+        for k in all_weeks
     ]
     
     return templates.TemplateResponse(request, "index.html", {
@@ -814,16 +837,20 @@ async def api_get_session(
 
 # ── Cardio helpers ────────────────────────────────────────────────────────────
 
-def _cardio_pace(c: models.CardioActivity) -> Optional[float]:
-    """Minutes per km, or None when we lack the distance or duration.
+def _cardio_pace_unit(c: models.CardioActivity) -> str:
+    """Distance unit the pace is expressed against (swimming: per 100 m)."""
+    return "100m" if (c.activity_type or "").lower() == "swimming" else "km"
 
-    Swimming is reported per km for consistency; callers may rescale (e.g.
-    to /100 m) from the raw distance_km/duration_min fields.
-    """
+
+def _cardio_pace(c: models.CardioActivity) -> Optional[float]:
+    """Minutes per pace unit (per km, or per 100 m for swimming), or None
+    when we lack the distance or duration."""
     if not c.distance_km or not c.duration_min:
         return None
     if c.distance_km <= 0:
         return None
+    if _cardio_pace_unit(c) == "100m":
+        return round(c.duration_min / (c.distance_km * 10), 2)
     return round(c.duration_min / c.distance_km, 2)
 
 
@@ -834,7 +861,8 @@ def _cardio_json(c: models.CardioActivity) -> dict:
         "activity_type": c.activity_type,
         "distance_km": c.distance_km,
         "duration_min": c.duration_min,
-        "pace_min_per_km": _cardio_pace(c),
+        "pace": _cardio_pace(c),
+        "pace_unit": _cardio_pace_unit(c),
         "notes": c.notes,
     }
 
