@@ -41,6 +41,18 @@ class WorkoutSession(Base):
     notes = Column(String, nullable=True)
     template = relationship("SessionTemplate")
     sets = relationship("SetEntry", back_populates="session", cascade="all, delete-orphan")
+    cardio = relationship("CardioActivity", back_populates="session", cascade="all, delete-orphan", order_by="CardioActivity.id")
+
+
+class CardioActivity(Base):
+    __tablename__ = "cardio_activities"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("workout_sessions.id"), index=True)
+    activity_type = Column(String, nullable=False)
+    distance_km = Column(Float, nullable=True)
+    duration_min = Column(Float, nullable=True)
+    notes = Column(String, nullable=True)
+    session = relationship("WorkoutSession", back_populates="cardio")
 
 
 class SetEntry(Base):

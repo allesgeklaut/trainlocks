@@ -24,7 +24,12 @@
         {% for sess in sessions %}
         <tr style="cursor: pointer;" onclick="window.location.href='/sessions/{{ sess.id }}'">
           <td>{{ sess.date }}</td>
-          <td>{{ sess.template.name if sess.template else "—" }}</td>
+          <td>
+            {{ sess.template.name if sess.template else "—" }}
+            {% for a in sess.cardio %}
+            <span class="badge badge-cardio">{{ a.activity_type }}{% if a.distance_km %} {{ a.distance_km }}km{% endif %}</span>
+            {% endfor %}
+          </td>
           <td class="notes-cell" onclick="event.stopPropagation()">
             <span class="notes-text">{{ sess.notes or "" }}</span>
             <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>

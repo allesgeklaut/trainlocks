@@ -162,3 +162,94 @@ def test_create_session_browser_still_redirects(client):
     }, follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/sessions"
+
+
+# ---------- Cardio API ----------
+
+def _cardio_payload(**overrides):
+    payload = {
+        "activity_type": "running",
+        "distance_km": 5,
+        "duration_min": 30,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_api_cardio_create_list_detail_delete(client):
+    resp = client.post("/api/cardio", json=_cardio_payload())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["activity_type"] == "running"
+    assert body["distance_km"] == 5
+    assert body["duration_min"] == 30
+    assert body["pace_min_per_km"] == pytest.approx(6.0)
+    assert "id" in body and "session_id" in body
+
+    resp = client.get("/api/cardio")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["id"] == body["id"]
+
+    resp = client.get(f"/api/cardio/{body['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["activity_type"] == "running"
+
+    resp = client.delete(f"/api/cardio/{body['id']}")
+    assert resp.status_code == 200
+
+    assert client.get("/api/cardio").json() == []
+    assert client.get(f"/api/cardio/{body['id']}").status_code == 404
+    assert client.delete(f"/api/cardio/{body['id']}").status_code == 404
+
+
+def test_api_cardio_requires_type_and_values(client):
+    assert client.post("/api/cardio", json={}).status_code == 400
+    assert client.post("/api/cardio", json={"activity_type": "running"}).status_code == 400
+    assert client.post("/api/cardio", json={"activity_type": "", "distance_km": 5}).status_code == 400
+    assert client.post("/api/cardio", json={"activity_type": "running", "distance_km": "abc"}).status_code == 400
+    assert client.post("/api/cardio", json={"activity_type": "running", "duration_min": -1}).status_code == 400
+
+
+def test_api_cardio_invalid_date(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(date="nope"))
+    assert resp.status_code == 400
+
+
+def test_api_cardio_requires_session(client):
+    # no session exists yet for today; cardio create must find-or-create it
+    before = client.get("/api/sessions").json()
+    client.post("/api/cardio", json=_cardio_payload())
+    after = client.get("/api/sessions").json()
+    assert len(after) == len(before) + 1
+
+
+def test_api_cardio_attached_to_session_by_date(client):
+    before = len(client.get("/api/sessions").json())
+    resp = client.post("/api/cardio", json=_cardio_payload(distance_km=1, duration_min=20))
+    first_id = resp.json()["session_id"]
+    resp = client.post("/api/cardio", json=_cardio_payload(activity_type="swimming", distance_km=1, duration_min=20))
+    second_id = resp.json()["session_id"]
+    # same date -> same underlying session
+    assert first_id == second_id
+    assert len(client.get("/api/sessions").json()) == before + 1
+
+    resp = client.get(f"/api/sessions/{first_id}")
+    assert resp.status_code == 200
+    cardio = resp.json()["cardio"]
+    assert [a["activity_type"] for a in cardio] == ["running", "swimming"]
+
+
+def test_api_session_list_includes_cardio(client):
+    client.post("/api/cardio", json=_cardio_payload())
+    resp = client.get("/api/sessions")
+    assert resp.status_code == 200
+    sessions = resp.json()
+    assert len(sessions) == 1
+    assert len(sessions[0]["cardio"]) == 1
+    assert sessions[0]["cardio"][0]["activity_type"] == "running"
+
+
+def test_api_cardio_bad_delete(client):
+    assert client.delete("/api/cardio/99999").status_code == 404

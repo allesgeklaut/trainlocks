@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Cardio — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Cardio</h1>
+  <p class="page-subtitle">Running, swimming and other endurance work</p>
+</div>
+
+{% if request.query_params.get("created") %}
+<div class="card" style="border-color:var(--color-success);color:var(--color-success);margin-bottom:var(--space-4);padding:var(--space-3) var(--space-5)">
+  ✓ Cardio activity logged.
+</div>
+{% endif %}
+
+<div class="card-grid">
+  <div class="card">
+    <div class="card-title">Log Cardio</div>
+    <form method="post" action="/cardio">
+      <div class="form-group">
+        <label for="activity_type">Activity</label>
+        <select id="activity_type" name="activity_type">
+          <option value="running" selected>Running</option>
+          <option value="swimming">Swimming</option>
+          <option value="cycling">Cycling</option>
+          <option value="walking">Walking</option>
+          <option value="rowing">Rowing</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="date">Date</label>
+        <input type="date" id="date" name="date" value="{{ today }}" required />
+      </div>
+      <div class="form-group">
+        <label for="distance_km">Distance (km)</label>
+        <input type="number" id="distance_km" name="distance_km" step="0.01" min="0" placeholder="e.g. 5.0" />
+      </div>
+      <div class="form-group">
+        <label for="duration_min">Duration (minutes)</label>
+        <input type="number" id="duration_min" name="duration_min" step="0.1" min="0" placeholder="e.g. 30" />
+      </div>
+      <div class="form-group">
+        <label for="notes">Notes (optional)</label>
+        <textarea id="notes" name="notes" rows="2" placeholder="Feeling, route, heart rate…"></textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">Log Activity</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Recent Activities</div>
+    {% if activities %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Activity</th><th>Distance</th><th>Duration</th><th>Pace</th><th></th></tr></thead>
+        <tbody>
+          {% for a in activities %}
+          <tr>
+            <td>{{ a.session.date }}</td>
+            <td>
+              <span class="badge badge-cardio">{{ a.activity_type }}</span>
+              {% if a.notes and a.notes|length > 20 %}
+                <span class="text-muted" title="{{ a.notes }}">{{ a.notes[:20] }}…</span>
+              {% elif a.notes %}
+                <span class="text-muted">{{ a.notes }}</span>
+              {% endif %}
+            </td>
+            <td>{{ a.distance_km ~ ' km' if a.distance_km is not none else '—' }}</td>
+            <td>{{ a.duration_min ~ ' min' if a.duration_min is not none else '—' }}</td>
+            <td>{{ _cardio_pace_display(a) }}</td>
+            <td>
+              <form method="post" action="/cardio/{{ a.id }}/delete" style="display:inline">
+                <button type="submit" class="btn-icon btn-icon-danger" title="Delete"
+                  onclick="return confirm('Delete this {{ a.activity_type }} activity?')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+      <h3>No cardio logged yet</h3>
+      <p>Log your first run or swim to start tracking endurance.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
