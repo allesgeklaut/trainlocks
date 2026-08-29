@@ -830,6 +830,27 @@ table tbody tr:hover {
 .notes-cell.expanded .notes-toggle svg {
   transform: rotate(180deg);
 }
+.notes-edit {
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-2);
+  color: var(--color-text-muted);
+  vertical-align: bottom;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-interactive), color var(--transition-interactive);
+}
+.notes-cell:hover .notes-edit,
+.notes-cell.expanded .notes-edit {
+  opacity: 1;
+}
+.notes-edit:hover {
+  color: var(--color-primary);
+}
+.notes-edit svg {
+  width: 12px;
+  height: 12px;
+}
 
 /* ── Icon buttons in tables ─────────────────────────────────────────────── */
 .btn-icon {
