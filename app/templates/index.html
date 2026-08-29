@@ -48,7 +48,7 @@
         <tr style="cursor: pointer;" onclick="window.location.href='/sessions/{{ sess.id }}'">
           <td>{{ sess.date }}</td>
           <td>
-            {{ sess.template.name if sess.template else "—" }}
+            {% if sess.template %}{{ sess.template.name }}{% elif not sess.cardio %}—{% endif %}
             {% for a in sess.cardio %}
             <span class="badge badge-cardio">{{ a.activity_type }}{% if a.distance_km %} {{ a.distance_km }}km{% endif %}</span>
             {% endfor %}
