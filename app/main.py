@@ -74,6 +74,12 @@ with engine.begin() as conn:
         "CREATE INDEX IF NOT EXISTS ix_cardio_activities_session_id "
         "ON cardio_activities (session_id)"
     ))
+    # users.bodyweight powers bodyweight-exercise load scaling; the column
+    # predates create_all on existing DBs, so add it if missing.
+    try:
+        conn.execute(sa_text("ALTER TABLE users ADD COLUMN bodyweight FLOAT"))
+    except Exception:
+        pass
 
 app = FastAPI(title="Training Log Dashboard")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -101,6 +107,9 @@ templates.env.globals["_cardio_pace_display"] = _cardio_pace_display
 
 # Dashboard cardio load: per-activity effort multiplier applied to distance (km).
 CARDIO_LOAD_FACTOR = {"running": 1.0, "swimming": 3.0}
+# Fallback for bodyweight-exercise load scaling when the user hasn't set a
+# bodyweight in their profile.
+BODYWEIGHT_DEFAULT_KG = 80.0
 CARDIO_LOAD_DEFAULT_FACTOR = 1.0
 
 
@@ -242,6 +251,33 @@ async def logout(tl_session: Optional[str] = Cookie(default=None)):
     return response
 
 
+# ── PROFILE ────────────────────────────────────────────────────────────────────
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request, user: models.User = Depends(get_current_user)):
+    return templates.TemplateResponse(request, "profile.html", {"user": user})
+
+
+@app.post("/profile")
+async def profile_update(
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    raw = form.get("bodyweight")
+    try:
+        bodyweight = float(raw) if raw is not None and str(raw).strip() else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="bodyweight must be a number in kg")
+    if bodyweight is not None and bodyweight < 0:
+        raise HTTPException(status_code=400, detail="bodyweight must be >= 0")
+    # user comes from get_current_user's own session; persist via the route's.
+    db.get(models.User, user.id).bodyweight = bodyweight
+    db.commit()
+    return RedirectResponse("/profile?saved=1", status_code=303)
+
+
 # ── PAGES ────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -262,11 +298,17 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
     )
     # Build weekly training load: sum(weight * reps) per ISO week
     weekly_load = defaultdict(float)
+    bodyweight_kg = user.bodyweight or BODYWEIGHT_DEFAULT_KG
     for sess in recent_sessions_full:
         iso_cal = sess.date.isocalendar()
         week_key = f"{iso_cal[0]}-W{iso_cal[1]:02d}"
         for set_entry in sess.sets:
-            weight = set_entry.weight if set_entry.weight is not None else 1.0
+            is_bodyweight = bool(set_entry.exercise and set_entry.exercise.is_bodyweight)
+            if is_bodyweight:
+                # Bodyweight lifts count as bodyweight + any added kg (vest, belt).
+                weight = bodyweight_kg + (set_entry.weight or 0.0)
+            else:
+                weight = set_entry.weight if set_entry.weight is not None else 1.0
             weekly_load[week_key] += weight * set_entry.reps
 
     # Cardio load per ISO week: distance scaled by per-activity effort factor
