@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from sqlalchemy import text as sa_text
 
 # 1. Load environment variables first so they can be used for DB setup or by other modules
 load_dotenv()
@@ -47,6 +48,33 @@ from .auth import get_current_user, create_session_cookie, verify_password, COOK
 from .database import Base, SessionLocal, engine
 
 Base.metadata.create_all(bind=engine)
+
+# ── Lightweight migration for existing databases ──────────────────────────
+# The app has no Alembic; create_all only creates missing tables but won't
+# add tables/columns to an existing DB file. Mimic it with an idempotent
+# CREATE TABLE IF NOT EXISTS for the cardio table so pre-existing volumes
+# (./training_log_data/training_log.db) pick it up on next start.
+with engine.begin() as conn:
+    conn.execute(sa_text(
+        """
+        CREATE TABLE IF NOT EXISTS cardio_activities (
+            id INTEGER NOT NULL PRIMARY KEY,
+            session_id INTEGER,
+            activity_type VARCHAR NOT NULL,
+            distance_km FLOAT,
+            duration_min FLOAT,
+            notes VARCHAR,
+            CONSTRAINT fk_cardio_activities_session_id
+                FOREIGN KEY(session_id) REFERENCES workout_sessions (id)
+        )
+        """
+    ))
+    # Add the index if the table was pre-existing (create_all won't have run).
+    conn.execute(sa_text(
+        "CREATE INDEX IF NOT EXISTS ix_cardio_activities_session_id "
+        "ON cardio_activities (session_id)"
+    ))
+
 app = FastAPI(title="Training Log Dashboard")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
@@ -54,6 +82,22 @@ templates = Jinja2Templates(directory="app/templates")
 # browsers re-fetch CSS/JS after a rebuild.
 STATIC_VERSION = str(int(time.time()))
 templates.env.globals["static_version"] = STATIC_VERSION
+
+
+def _cardio_pace_display(c) -> str:
+    """Human pace string for templates (e.g. '6:00 /km') or '—'."""
+    p = _cardio_pace(c)
+    if p is None:
+        return "—"
+    m = int(p)
+    s = int(round((p - m) * 60))
+    if s == 60:
+        m += 1
+        s = 0
+    return f"{m}:{s:02d} /km"
+
+
+templates.env.globals["_cardio_pace_display"] = _cardio_pace_display
 
 FREE_EXERCISE_DB_URL = (
     "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json"
@@ -543,6 +587,91 @@ async def progression(request: Request, user: models.User = Depends(get_current_
     })
 
 
+# ── CARDIO (running / swimming) ──────────────────────────────────────────────
+
+@app.get("/cardio", response_class=HTMLResponse)
+async def cardio_page(
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    activities = (
+        db.query(models.CardioActivity)
+        .join(models.WorkoutSession)
+        .order_by(models.WorkoutSession.date.desc(), models.CardioActivity.id.desc())
+        .limit(50)
+        .all()
+    )
+    return templates.TemplateResponse(request, "cardio.html", {
+        "activities": activities, "today": date.today(), "user": user,
+    })
+
+
+@app.post("/cardio")
+async def cardio_create(
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    form = await request.form()
+    activity_type = (form.get("activity_type") or "").strip().lower()
+    if not activity_type:
+        raise HTTPException(status_code=400, detail="activity_type is required")
+
+    def _to_float(v):
+        if v is None or v == "":
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid numeric value")
+
+    distance_km = _to_float(form.get("distance_km"))
+    duration_min = _to_float(form.get("duration_min"))
+    if (distance_km is None or distance_km == 0) and duration_min is None:
+        raise HTTPException(status_code=400, detail="enter a distance or a duration")
+
+    date_str = form.get("date") or date.today().isoformat()
+    try:
+        activity_date = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date")
+
+    sess = (
+        db.query(models.WorkoutSession)
+        .filter(models.WorkoutSession.date == activity_date)
+        .first()
+    )
+    if not sess:
+        sess = models.WorkoutSession(date=activity_date)
+        db.add(sess)
+        db.flush()
+
+    db.add(models.CardioActivity(
+        session_id=sess.id,
+        activity_type=activity_type,
+        distance_km=distance_km,
+        duration_min=duration_min,
+        notes=form.get("notes") or None,
+    ))
+    db.commit()
+    return RedirectResponse(url="/cardio?created=1", status_code=303)
+
+
+@app.post("/cardio/{cardio_id}/delete")
+async def cardio_delete(
+    cardio_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    c = db.get(models.CardioActivity, cardio_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Cardio activity not found")
+    db.delete(c)
+    db.commit()
+    return RedirectResponse(url="/cardio", status_code=303)
+
+
 # ── JSON API for chart data ───────────────────────────────────────────────────
 
 @app.get("/api/progression/{exercise_id}")
@@ -642,6 +771,7 @@ async def api_list_sessions(
             "template_id": s.template_id,
             "template_name": s.template.name if s.template else None,
             "notes": s.notes,
+            "cardio": [_cardio_json(c) for c in s.cardio],
         }
         for s in sessions
     ]
@@ -678,7 +808,167 @@ async def api_get_session(
             }
             for s in sets
         ],
+        "cardio": [_cardio_json(c) for c in sess.cardio],
     }
+
+
+# ── Cardio helpers ────────────────────────────────────────────────────────────
+
+def _cardio_pace(c: models.CardioActivity) -> Optional[float]:
+    """Minutes per km, or None when we lack the distance or duration.
+
+    Swimming is reported per km for consistency; callers may rescale (e.g.
+    to /100 m) from the raw distance_km/duration_min fields.
+    """
+    if not c.distance_km or not c.duration_min:
+        return None
+    if c.distance_km <= 0:
+        return None
+    return round(c.duration_min / c.distance_km, 2)
+
+
+def _cardio_json(c: models.CardioActivity) -> dict:
+    return {
+        "id": c.id,
+        "session_id": c.session_id,
+        "activity_type": c.activity_type,
+        "distance_km": c.distance_km,
+        "duration_min": c.duration_min,
+        "pace_min_per_km": _cardio_pace(c),
+        "notes": c.notes,
+    }
+
+
+# ── Cardio CRUD (JSON API) ───────────────────────────────────────────────────
+
+@app.get("/api/cardio")
+async def api_list_cardio(
+    limit: int = Query(50, ge=1, le=500),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List cardio activities, newest first (by their session date)."""
+    rows = (
+        db.query(models.CardioActivity)
+        .join(models.WorkoutSession)
+        .order_by(models.WorkoutSession.date.desc(), models.CardioActivity.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [dict(_cardio_json(c), date=str(c.session.date)) for c in rows]
+
+
+@app.get("/api/cardio/{cardio_id}")
+async def api_get_cardio(
+    cardio_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    c = db.get(models.CardioActivity, cardio_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Cardio activity not found")
+    return dict(_cardio_json(c), date=str(c.session.date))
+
+
+@app.post("/api/cardio")
+async def api_create_cardio(
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a cardio activity.
+
+    Accepts JSON (recommended for API/MCP clients) or form data. Attaches to
+    the session for ``date`` (creating one if none exists for that date) or to
+    an explicit ``session_id``.
+    """
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+        get = lambda k, d=None: body.get(k, d)
+    else:
+        form = await request.form()
+        get = lambda k, d=None: form.get(k, d)
+
+    activity_type = (get("activity_type") or "").strip().lower()
+    if not activity_type:
+        raise HTTPException(status_code=400, detail="activity_type is required")
+
+    def _to_float(v):
+        if v is None or v == "":
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400, detail=f"invalid numeric value: {v!r}"
+            )
+
+    distance_km = _to_float(get("distance_km"))
+    duration_min = _to_float(get("duration_min"))
+    if distance_km is not None and distance_km < 0:
+        raise HTTPException(status_code=400, detail="distance_km must be >= 0")
+    if duration_min is not None and duration_min < 0:
+        raise HTTPException(status_code=400, detail="duration_min must be >= 0")
+    if distance_km is None and duration_min is None:
+        raise HTTPException(
+            status_code=400, detail="at least one of distance_km or duration_min is required"
+        )
+    if distance_km == 0 and duration_min is None:
+        raise HTTPException(status_code=400, detail="distance_km is 0 but duration_min is missing")
+
+    session_id = get("session_id")
+    if session_id is not None and session_id != "":
+        try:
+            session_id = int(session_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid session_id")
+        sess = db.get(models.WorkoutSession, session_id)
+        if not sess:
+            raise HTTPException(status_code=404, detail="Session not found")
+    else:
+        # Attach to (or create) a session for the given date.
+        date_str = get("date") or date.today().isoformat()
+        try:
+            activity_date = date.fromisoformat(date_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date")
+        sess = (
+            db.query(models.WorkoutSession)
+            .filter(models.WorkoutSession.date == activity_date)
+            .first()
+        )
+        if not sess:
+            sess = models.WorkoutSession(date=activity_date)
+            db.add(sess)
+            db.flush()
+
+    notes = get("notes") or None
+    c = models.CardioActivity(
+        session_id=sess.id,
+        activity_type=activity_type,
+        distance_km=distance_km,
+        duration_min=duration_min,
+        notes=notes,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return JSONResponse(dict(_cardio_json(c), date=str(sess.date)), status_code=201)
+
+
+@app.delete("/api/cardio/{cardio_id}")
+async def api_delete_cardio(
+    cardio_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    c = db.get(models.CardioActivity, cardio_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Cardio activity not found")
+    db.delete(c)
+    db.commit()
+    return JSONResponse({"deleted": cardio_id})
 
 
 # ── BROWSE EXERCISES (free-exercise-db) ──────────────────────────────────────
