@@ -325,12 +325,14 @@ def test_sessions_overview_shows_cardio_notes(client):
     resp = client.post("/api/cardio", json=_cardio_payload(
         activity_type="swimming", notes="swam at the pool, 6x200m"))
     assert resp.status_code == 201
+    cardio_id = resp.json()["id"]
 
     resp = client.get("/sessions")
     assert resp.status_code == 200
     assert "swam at the pool, 6x200m" in resp.text
-    assert "swimming" in resp.text
+    assert f"/cardio/{cardio_id}/edit" in resp.text
 
     resp = client.get("/")
     assert resp.status_code == 200
     assert "swam at the pool, 6x200m" in resp.text
+    assert f"/cardio/{cardio_id}/edit" in resp.text
