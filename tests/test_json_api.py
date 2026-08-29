@@ -331,8 +331,33 @@ def test_sessions_overview_shows_cardio_notes(client):
     assert resp.status_code == 200
     assert "swam at the pool, 6x200m" in resp.text
     assert f"/cardio/{cardio_id}/edit" in resp.text
+    # cardio-only session: the row's main Edit button opens the cardio edit
+    assert f'<a href="/cardio/{cardio_id}/edit" class="btn-icon" title="Edit">' in resp.text
 
     resp = client.get("/")
     assert resp.status_code == 200
     assert "swam at the pool, 6x200m" in resp.text
     assert f"/cardio/{cardio_id}/edit" in resp.text
+
+
+def test_sessions_overview_edit_button_routing(client):
+    # Strength session + cardio: main Edit button stays on the session edit.
+    bench_id, _, _, resp = _seed(client)
+    assert resp.status_code == 201
+    session_id = resp.json()["id"]
+    client.post("/api/cardio", json=_cardio_payload(date="2026-08-25"))
+
+    resp = client.get("/sessions")
+    assert resp.status_code == 200
+    assert f'/sessions/edit/{session_id}" class="btn-icon" title="Edit"' in resp.text
+
+
+def test_view_session_edit_button_routing(client):
+    # Cardio-only session: detail page Edit button opens the cardio edit.
+    resp = client.post("/api/cardio", json=_cardio_payload(notes="morning tempo run"))
+    cardio_id = resp.json()["id"]
+    session_id = resp.json()["session_id"]
+
+    resp = client.get(f"/sessions/{session_id}")
+    assert resp.status_code == 200
+    assert f'<a href="/cardio/{cardio_id}/edit" class="btn btn-primary">Edit</a>' in resp.text
