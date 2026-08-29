@@ -268,3 +268,69 @@ def test_api_session_list_includes_cardio(client):
 
 def test_api_cardio_bad_delete(client):
     assert client.delete("/api/cardio/99999").status_code == 404
+
+
+def test_cardio_edit_prefills_existing_values(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(notes="morning tempo run"))
+    assert resp.status_code == 201
+    cardio_id = resp.json()["id"]
+
+    resp = client.get(f"/cardio/{cardio_id}/edit")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "morning tempo run" in html
+    assert 'value="5.0"' in html
+    assert 'value="30.0"' in html
+    assert '<option value="running" selected' in html
+
+
+def test_cardio_edit_saves_without_losing_notes(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(notes="morning tempo run"))
+    cardio_id = resp.json()["id"]
+
+    resp = client.post(
+        f"/cardio/{cardio_id}",
+        data={
+            "activity_type": "running",
+            "date": "2026-08-29",
+            "distance_km": "5",
+            "duration_min": "30",
+            "notes": "morning tempo run, felt easy",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/cardio"
+
+    detail = client.get(f"/api/cardio/{cardio_id}").json()
+    assert detail["notes"] == "morning tempo run, felt easy"
+    assert detail["distance_km"] == 5
+    assert detail["duration_min"] == 30
+    assert detail["activity_type"] == "running"
+
+
+def test_cardio_edit_bad_id_and_validation(client):
+    assert client.get("/cardio/99999/edit").status_code == 404
+    assert client.post("/cardio/99999", data={}).status_code == 404
+    resp = client.post("/api/cardio", json=_cardio_payload())
+    cardio_id = resp.json()["id"]
+    # no distance and no duration -> 400, existing values untouched
+    assert client.post(f"/cardio/{cardio_id}", data={
+        "activity_type": "running",
+    }).status_code == 400
+    assert client.get(f"/api/cardio/{cardio_id}").json()["notes"] is None
+
+
+def test_sessions_overview_shows_cardio_notes(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(
+        activity_type="swimming", notes="swam at the pool, 6x200m"))
+    assert resp.status_code == 201
+
+    resp = client.get("/sessions")
+    assert resp.status_code == 200
+    assert "swam at the pool, 6x200m" in resp.text
+    assert "swimming" in resp.text
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "swam at the pool, 6x200m" in resp.text
