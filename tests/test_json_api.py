@@ -183,7 +183,8 @@ def test_api_cardio_create_list_detail_delete(client):
     assert body["activity_type"] == "running"
     assert body["distance_km"] == 5
     assert body["duration_min"] == 30
-    assert body["pace_min_per_km"] == pytest.approx(6.0)
+    assert body["pace"] == pytest.approx(6.0)
+    assert body["pace_unit"] == "km"
     assert "id" in body and "session_id" in body
 
     resp = client.get("/api/cardio")
@@ -239,6 +240,20 @@ def test_api_cardio_attached_to_session_by_date(client):
     assert resp.status_code == 200
     cardio = resp.json()["cardio"]
     assert [a["activity_type"] for a in cardio] == ["running", "swimming"]
+
+
+def test_api_cardio_swimming_pace_per_100m(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(activity_type="swimming", distance_km=1, duration_min=20))
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["activity_type"] == "swimming"
+    # 1 km in 20 min => 10 x 100m => 2.0 min per 100m
+    assert body["pace"] == pytest.approx(2.0)
+    assert body["pace_unit"] == "100m"
+    # detail endpoint agrees
+    detail = client.get(f"/api/cardio/{body['id']}").json()
+    assert detail["pace"] == pytest.approx(2.0)
+    assert detail["pace_unit"] == "100m"
 
 
 def test_api_session_list_includes_cardio(client):
