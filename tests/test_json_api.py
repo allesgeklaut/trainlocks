@@ -365,6 +365,43 @@ def test_dashboard_cardio_load_scales_by_activity(client):
     assert "Cardio Load" in resp.text
 
 
+def test_dashboard_bodyweight_load_scaling(client):
+    bench_id, pull_id, tpl_id, resp = _seed(client)
+    assert resp.status_code == 201
+    # Bench: 80*10 + 82.5*8 = 1460 (recorded weight).
+    # Pull-ups (bodyweight, no added weight): 6 reps x 80 default bodyweight = 480.
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '"load": 1940.0' in resp.text
+
+    # Adding 10 kg (vest/belt) raises the pull-up set to (80 + 10) x 6 = 540.
+    db = SessionLocal()
+    sess = db.query(models.WorkoutSession).filter_by(date=date(2026, 8, 25)).first()
+    pull_set = [s for s in sess.sets if s.exercise_id == pull_id][0]
+    pull_set.weight = 10
+    db.commit()
+    db.close()
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '"load": 2000.0' in resp.text
+
+
+def test_profile_bodyweight(client):
+    bench_id, pull_id, tpl_id, resp = _seed(client)
+    assert resp.status_code == 201
+    resp = client.get("/profile")
+    assert resp.status_code == 200
+    assert 'name="bodyweight"' in resp.text
+
+    # Setting bodyweight to 78 changes the pull-up set from 6 x 80 to 6 x 78 = 468.
+    resp = client.post("/profile", data={"bodyweight": "78"}, follow_redirects=False)
+    assert resp.status_code == 303
+    resp = client.get("/profile")
+    assert 'value="78.0"' in resp.text
+    resp = client.get("/")
+    assert '"load": 1928.0' in resp.text
+
+
 def test_sessions_overview_shows_cardio_notes(client):
     resp = client.post("/api/cardio", json=_cardio_payload(
         activity_type="swimming", notes="swam at the pool, 6x200m"))
