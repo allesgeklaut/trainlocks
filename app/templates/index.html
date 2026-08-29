@@ -53,9 +53,22 @@
             <span class="badge badge-cardio">{{ a.activity_type }}{% if a.distance_km %} {{ a.distance_km }}km{% endif %}</span>
             {% endfor %}
           </td>
-          <td class="notes-cell" onclick="event.stopPropagation()">
-            <span class="notes-text">{{ sess.notes or "" }}</span>
-            <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+          <td onclick="event.stopPropagation()">
+            {% if sess.notes %}
+            <div class="notes-cell">
+              <span class="notes-text">{{ sess.notes }}</span>
+              <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+            </div>
+            {% endif %}
+            {% for a in sess.cardio %}
+            {% if a.notes %}
+            <div class="notes-cell">
+              <span class="badge badge-cardio">{{ a.activity_type }}</span>
+              <span class="notes-text">{{ a.notes }}</span>
+              <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+            </div>
+            {% endif %}
+            {% endfor %}
           </td>
           <td class="actions" onclick="event.stopPropagation();">
             <a href="/sessions/{{ sess.id }}" class="btn-icon" title="View"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>

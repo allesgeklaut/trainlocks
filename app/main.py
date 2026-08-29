@@ -681,6 +681,75 @@ async def cardio_create(
     return RedirectResponse(url="/cardio?created=1", status_code=303)
 
 
+@app.get("/cardio/{cardio_id}/edit", response_class=HTMLResponse)
+async def cardio_edit_page(
+    cardio_id: int,
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    c = db.get(models.CardioActivity, cardio_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Cardio activity not found")
+    return templates.TemplateResponse(request, "cardio_edit.html", {
+        "activity": c, "today": date.today(), "user": user,
+    })
+
+
+@app.post("/cardio/{cardio_id}")
+async def cardio_update(
+    cardio_id: int,
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    c = db.get(models.CardioActivity, cardio_id)
+    if not c:
+        raise HTTPException(status_code=404, detail="Cardio activity not found")
+
+    form = await request.form()
+    activity_type = (form.get("activity_type") or "").strip().lower()
+    if not activity_type:
+        raise HTTPException(status_code=400, detail="activity_type is required")
+
+    def _to_float(v):
+        if v is None or v == "":
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid numeric value")
+
+    distance_km = _to_float(form.get("distance_km"))
+    duration_min = _to_float(form.get("duration_min"))
+    if (distance_km is None or distance_km == 0) and duration_min is None:
+        raise HTTPException(status_code=400, detail="enter a distance or a duration")
+
+    date_str = form.get("date") or c.session.date.isoformat()
+    try:
+        activity_date = date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date")
+
+    sess = (
+        db.query(models.WorkoutSession)
+        .filter(models.WorkoutSession.date == activity_date)
+        .first()
+    )
+    if not sess:
+        sess = models.WorkoutSession(date=activity_date)
+        db.add(sess)
+        db.flush()
+
+    c.session_id = sess.id
+    c.activity_type = activity_type
+    c.distance_km = distance_km
+    c.duration_min = duration_min
+    c.notes = form.get("notes") or None
+    db.commit()
+    return RedirectResponse(url="/cardio", status_code=303)
+
+
 @app.post("/cardio/{cardio_id}/delete")
 async def cardio_delete(
     cardio_id: int,
