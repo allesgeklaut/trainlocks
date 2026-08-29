@@ -36,8 +36,8 @@
         <input type="number" id="distance_km" name="distance_km" step="0.01" min="0" placeholder="e.g. 5.0" />
       </div>
       <div class="form-group">
-        <label for="duration_min">Duration (minutes)</label>
-        <input type="number" id="duration_min" name="duration_min" step="0.1" min="0" placeholder="e.g. 30" />
+        <label for="duration_min">Duration (minutes or mm:ss)</label>
+        <input type="text" id="duration_min" name="duration_min" placeholder="e.g. 30 or 29:51" />
       </div>
       <div class="form-group">
         <label for="notes">Notes (optional)</label>
@@ -61,7 +61,7 @@
               <span class="badge badge-cardio">{{ a.activity_type }}</span>
             </td>
             <td>{{ a.distance_km ~ ' km' if a.distance_km is not none else '—' }}</td>
-            <td>{{ a.duration_min ~ ' min' if a.duration_min is not none else '—' }}</td>
+            <td>{{ _cardio_duration_display(a) }}</td>
             <td>{{ _cardio_pace_display(a) }}</td>
             <td class="notes-cell">
               <span class="notes-text">{{ a.notes or "" }}</span>
