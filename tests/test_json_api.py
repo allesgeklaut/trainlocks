@@ -211,6 +211,15 @@ def test_api_cardio_requires_type_and_values(client):
     assert client.post("/api/cardio", json={"activity_type": "", "distance_km": 5}).status_code == 400
     assert client.post("/api/cardio", json={"activity_type": "running", "distance_km": "abc"}).status_code == 400
     assert client.post("/api/cardio", json={"activity_type": "running", "duration_min": -1}).status_code == 400
+    # invalid mm:ss -> 400
+    assert client.post("/api/cardio", json={"activity_type": "running", "duration_min": "12:75"}).status_code == 400
+
+
+def test_api_cardio_duration_minutes_seconds(client):
+    resp = client.post("/api/cardio", json={"activity_type": "running", "duration_min": "44:51"})
+    assert resp.status_code == 201
+    # 44:51 -> 44 + 51/60 minutes
+    assert resp.json()["duration_min"] == pytest.approx(44 + 51 / 60)
 
 
 def test_api_cardio_invalid_date(client):
@@ -280,7 +289,7 @@ def test_cardio_edit_prefills_existing_values(client):
     html = resp.text
     assert "morning tempo run" in html
     assert 'value="5.0"' in html
-    assert 'value="30.0"' in html
+    assert 'value="30"' in html
     assert '<option value="running" selected' in html
 
 
@@ -319,6 +328,41 @@ def test_cardio_edit_bad_id_and_validation(client):
         "activity_type": "running",
     }).status_code == 400
     assert client.get(f"/api/cardio/{cardio_id}").json()["notes"] is None
+
+
+def test_cardio_form_duration_minutes_seconds(client):
+    resp = client.post("/cardio", data={
+        "activity_type": "Running", "duration_min": "44:51",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+    resp = client.get("/cardio")
+    assert "44:51" in resp.text
+
+
+def test_cardio_form_duration_validation(client):
+    for bad in ("12:75", "abc", "-5"):
+        resp = client.post("/cardio", data={
+            "activity_type": "running", "duration_min": bad,
+        }, follow_redirects=False)
+        assert resp.status_code == 400
+
+
+def test_cardio_edit_prefills_duration_seconds(client):
+    client.post("/cardio", data={
+        "activity_type": "running", "duration_min": "44:51",
+    }, follow_redirects=False)
+    resp = client.get("/cardio/1/edit")
+    assert 'value="44:51"' in resp.text
+
+
+def test_dashboard_cardio_load_scales_by_activity(client):
+    # 5 km run (x1) + 1 km swim (x3) -> weekly cardio load of 8.0
+    client.post("/api/cardio", json=_cardio_payload(activity_type="running", distance_km=5))
+    client.post("/api/cardio", json=_cardio_payload(activity_type="swimming", distance_km=1))
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '"cardio_load": 8.0' in resp.text
+    assert "Cardio Load" in resp.text
 
 
 def test_sessions_overview_shows_cardio_notes(client):

@@ -99,6 +99,62 @@ def _cardio_pace_display(c) -> str:
 
 templates.env.globals["_cardio_pace_display"] = _cardio_pace_display
 
+# Dashboard cardio load: per-activity effort multiplier applied to distance (km).
+CARDIO_LOAD_FACTOR = {"running": 1.0, "swimming": 3.0}
+CARDIO_LOAD_DEFAULT_FACTOR = 1.0
+
+
+def _cardio_load_factor(activity_type: str) -> float:
+    return CARDIO_LOAD_FACTOR.get((activity_type or "").lower(), CARDIO_LOAD_DEFAULT_FACTOR)
+
+
+def _parse_duration_min(value) -> float | None:
+    """Parse a form duration: minutes ('45', '44.85') or M:SS / H:MM:SS ('44:51').
+
+    Raises ValueError for non-empty values that don't match.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    value = value.strip()
+    if not value:
+        return None
+    parts = value.split(":")
+    if len(parts) in (2, 3) and all(p.strip().isdigit() for p in parts):
+        nums = [int(p) for p in parts]
+        if len(nums) == 2:
+            h, m, s = 0, nums[0], nums[1]
+        else:
+            h, m, s = nums
+        if not (0 <= m < 60 and 0 <= s < 60):
+            raise ValueError("invalid duration")
+        return h * 60 + m + s / 60
+    try:
+        return float(value)
+    except ValueError:
+        raise ValueError("invalid duration")
+
+
+def _cardio_duration_display(c) -> str:
+    """Human duration for templates ('45 min', '44:51') or '—'."""
+    if c.duration_min is None:
+        return "—"
+    m, s = divmod(round(c.duration_min * 60), 60)
+    return f"{m} min" if s == 0 else f"{m}:{s:02d}"
+
+
+def _cardio_duration_value(c) -> str:
+    """Prefill for the duration input ('45' or '44:51')."""
+    if c.duration_min is None:
+        return ""
+    m, s = divmod(round(c.duration_min * 60), 60)
+    return str(m) if s == 0 else f"{m}:{s:02d}"
+
+
+templates.env.globals["_cardio_duration_display"] = _cardio_duration_display
+templates.env.globals["_cardio_duration_value"] = _cardio_duration_value
+
 FREE_EXERCISE_DB_URL = (
     "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/dist/exercises.json"
 )
@@ -213,29 +269,29 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
             weight = set_entry.weight if set_entry.weight is not None else 1.0
             weekly_load[week_key] += weight * set_entry.reps
 
-    # Cardio load per ISO week: total distance (km) and duration (min)
+    # Cardio load per ISO week: distance scaled by per-activity effort factor
     cardio_activities = (
         db.query(models.CardioActivity)
         .join(models.WorkoutSession, models.CardioActivity.session_id == models.WorkoutSession.id)
         .filter(models.WorkoutSession.date >= twelve_weeks_ago)
         .all()
     )
-    weekly_cardio_km = defaultdict(float)
+    weekly_cardio_load = defaultdict(float)
     weekly_cardio_min = defaultdict(float)
     for a in cardio_activities:
         iso = a.session.date.isocalendar()
         week_key = f"{iso[0]}-W{iso[1]:02d}"
         if a.distance_km:
-            weekly_cardio_km[week_key] += a.distance_km
+            weekly_cardio_load[week_key] += a.distance_km * _cardio_load_factor(a.activity_type)
         if a.duration_min:
             weekly_cardio_min[week_key] += a.duration_min
 
-    all_weeks = sorted(set(weekly_load) | set(weekly_cardio_km) | set(weekly_cardio_min))
+    all_weeks = sorted(set(weekly_load) | set(weekly_cardio_load) | set(weekly_cardio_min))
     weekly_data = [
         {
             "date": k,
             "load": round(weekly_load.get(k, 0.0), 0),
-            "cardio_km": round(weekly_cardio_km.get(k, 0.0), 2),
+            "cardio_load": round(weekly_cardio_load.get(k, 0.0), 1),
             "cardio_min": round(weekly_cardio_min.get(k, 0.0), 0),
         }
         for k in all_weeks
@@ -650,7 +706,12 @@ async def cardio_create(
             raise HTTPException(status_code=400, detail="invalid numeric value")
 
     distance_km = _to_float(form.get("distance_km"))
-    duration_min = _to_float(form.get("duration_min"))
+    try:
+        duration_min = _parse_duration_min(form.get("duration_min"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="duration must be minutes (e.g. 45) or M:SS (e.g. 44:51)")
+    if duration_min is not None and duration_min < 0:
+        raise HTTPException(status_code=400, detail="duration must be >= 0")
     if (distance_km is None or distance_km == 0) and duration_min is None:
         raise HTTPException(status_code=400, detail="enter a distance or a duration")
 
@@ -721,7 +782,12 @@ async def cardio_update(
             raise HTTPException(status_code=400, detail="invalid numeric value")
 
     distance_km = _to_float(form.get("distance_km"))
-    duration_min = _to_float(form.get("duration_min"))
+    try:
+        duration_min = _parse_duration_min(form.get("duration_min"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="duration must be minutes (e.g. 45) or M:SS (e.g. 44:51)")
+    if duration_min is not None and duration_min < 0:
+        raise HTTPException(status_code=400, detail="duration must be >= 0")
     if (distance_km is None or distance_km == 0) and duration_min is None:
         raise HTTPException(status_code=400, detail="enter a distance or a duration")
 
@@ -1002,7 +1068,12 @@ async def api_create_cardio(
             )
 
     distance_km = _to_float(get("distance_km"))
-    duration_min = _to_float(get("duration_min"))
+    try:
+        duration_min = _parse_duration_min(get("duration_min"))
+    except ValueError:
+        raise HTTPException(
+            status_code=400, detail="duration_min must be minutes (e.g. 45) or M:SS (e.g. 44:51)"
+        )
     if distance_km is not None and distance_km < 0:
         raise HTTPException(status_code=400, detail="distance_km must be >= 0")
     if duration_min is not None and duration_min < 0:

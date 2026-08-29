@@ -118,8 +118,8 @@
         fill: true,
         tension: 0.3,
       }, {
-        label: "Cardio Distance (km)",
-        data: activityData.map(d => d.cardio_km),
+        label: "Cardio Load",
+        data: activityData.map(d => d.cardio_load),
         yAxisID: "y1",
         borderColor: colorBlue,
         backgroundColor: colorBlue + "33",
@@ -160,7 +160,7 @@
         },
         y1: {
           position: "right",
-          title: { display: true, text: "Cardio (km)", color: colorMuted, font: { size: 11 } },
+          title: { display: true, text: "Cardio Load", color: colorMuted, font: { size: 11 } },
           ticks: { color: colorMuted, font: { size: 11 } },
           grid: { drawOnChartArea: false },
           beginAtZero: true,
