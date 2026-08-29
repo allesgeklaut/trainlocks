@@ -52,22 +52,21 @@
     {% if activities %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Date</th><th>Activity</th><th>Distance</th><th>Duration</th><th>Pace</th><th></th></tr></thead>
+        <thead><tr><th>Date</th><th>Activity</th><th>Distance</th><th>Duration</th><th>Pace</th><th>Notes</th><th></th></tr></thead>
         <tbody>
           {% for a in activities %}
           <tr>
             <td>{{ a.session.date }}</td>
             <td>
               <span class="badge badge-cardio">{{ a.activity_type }}</span>
-              {% if a.notes and a.notes|length > 20 %}
-                <span class="text-muted" title="{{ a.notes }}">{{ a.notes[:20] }}…</span>
-              {% elif a.notes %}
-                <span class="text-muted">{{ a.notes }}</span>
-              {% endif %}
             </td>
             <td>{{ a.distance_km ~ ' km' if a.distance_km is not none else '—' }}</td>
             <td>{{ a.duration_min ~ ' min' if a.duration_min is not none else '—' }}</td>
             <td>{{ _cardio_pace_display(a) }}</td>
+            <td class="notes-cell">
+              <span class="notes-text">{{ a.notes or "" }}</span>
+              <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+            </td>
             <td>
               <form method="post" action="/cardio/{{ a.id }}/delete" style="display:inline">
                 <button type="submit" class="btn-icon btn-icon-danger" title="Delete"
