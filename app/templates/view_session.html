@@ -43,16 +43,53 @@
     </table>
   </div>
 </div>
-{% else %}
+{% elif not session.cardio %}
 <div class="card">
   <div class="empty-state">
-    <p>No sets recorded for this session.</p>
+    <p>No sets or cardio recorded for this session.</p>
+  </div>
+</div>
+{% endif %}
+
+{% if session.cardio %}
+<div class="card">
+  <div class="card-title">Cardio</div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Activity</th>
+          <th>Distance</th>
+          <th>Duration</th>
+          <th>Pace</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in session.cardio %}
+        <tr>
+          <td><span class="badge badge-cardio">{{ a.activity_type }}</span></td>
+          <td>{{ a.distance_km ~ ' km' if a.distance_km is not none else '—' }}</td>
+          <td>{{ _cardio_duration_display(a) }}</td>
+          <td>{{ _cardio_pace_display(a) }}</td>
+          <td class="notes-cell">
+            <span class="notes-text">{{ a.notes or "" }}</span>
+            <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </div>
 {% endif %}
 
 <div style="margin-top:var(--space-4)">
-   <a href="/sessions/edit/{{ session.id }}" class="btn btn-primary">Edit</a>
+    {% if session.cardio and not session.sets %}
+    <a href="/cardio/{{ session.cardio[0].id }}/edit" class="btn btn-primary">Edit</a>
+    {% else %}
+    <a href="/sessions/edit/{{ session.id }}" class="btn btn-primary">Edit</a>
+    {% endif %}
    <button id="back-btn" class="btn btn-secondary" style="margin-left:var(--space-3)">Back</button>
    <form method="post" action="/sessions/{{ session.id }}/delete" style="display:inline; margin-left:var(--space-3);"
      onsubmit="return confirm('Delete this session?');">

@@ -23,7 +23,7 @@
 
 <div class="card">
   <div class="section-header">
-    <span class="section-title">Weekly Training Load (Last 12 Weeks)</span>
+    <span class="section-title">Weekly Load (Last 12 Weeks)</span>
   </div>
   {% if weekly_activity %}
   <div style="height:200px;position:relative;">
@@ -47,10 +47,27 @@
         {% for sess in recent_sessions %}
         <tr style="cursor: pointer;" onclick="window.location.href='/sessions/{{ sess.id }}'">
           <td>{{ sess.date }}</td>
-          <td>{{ sess.template.name if sess.template else "—" }}</td>
-          <td class="notes-cell" onclick="event.stopPropagation()">
-            <span class="notes-text">{{ sess.notes or "" }}</span>
-            <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+          <td>
+            {% if sess.template %}{{ sess.template.name }}{% elif not sess.cardio %}—{% endif %}
+            {% for a in sess.cardio %}
+            <span class="badge badge-cardio">{{ a.activity_type }}{% if a.distance_km %} {{ a.distance_km }}km{% endif %}</span>
+            {% endfor %}
+          </td>
+          <td onclick="event.stopPropagation()">
+            {% if sess.notes %}
+            <div class="notes-cell">
+              <span class="notes-text">{{ sess.notes }}</span>
+              <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+            </div>
+            {% endif %}
+            {% for a in sess.cardio %}
+            {% if a.notes %}
+            <div class="notes-cell">
+              <span class="notes-text">{{ a.notes }}</span>
+              <a href="#" class="notes-toggle" onclick="event.preventDefault();this.parentElement.classList.toggle('expanded');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg></a>
+            </div>
+            {% endif %}
+            {% endfor %}
           </td>
           <td class="actions" onclick="event.stopPropagation();">
             <a href="/sessions/{{ sess.id }}" class="btn-icon" title="View"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
@@ -80,6 +97,7 @@
   const colorText     = style.getPropertyValue("--color-text").trim();
   const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
   const colorPrimary  = style.getPropertyValue("--color-primary").trim();
+  const colorBlue     = style.getPropertyValue("--color-blue").trim();
   const colorDivider  = style.getPropertyValue("--color-divider").trim();
 
   const ctx = document.getElementById("activityChart").getContext("2d");
@@ -88,8 +106,9 @@
     data: {
       labels: activityData.map(d => d.date),
       datasets: [{
-        label: "Training Load (kg)",
+        label: "Strength Load (kg)",
         data: activityData.map(d => d.load),
+        yAxisID: "y",
         borderColor: colorPrimary,
         backgroundColor: colorPrimary + "33",
         borderWidth: 2.5,
@@ -98,6 +117,19 @@
         pointHoverRadius: 6,
         fill: true,
         tension: 0.3,
+      }, {
+        label: "Cardio Load",
+        data: activityData.map(d => d.cardio_load),
+        yAxisID: "y1",
+        borderColor: colorBlue,
+        backgroundColor: colorBlue + "33",
+        borderWidth: 2,
+        borderDash: [5, 4],
+        pointBackgroundColor: colorBlue,
+        pointRadius: 3,
+        pointHoverRadius: 5,
+        fill: false,
+        tension: 0.3,
       }]
     },
     options: {
@@ -105,7 +137,7 @@
       maintainAspectRatio: false,
       animation: { duration: 700, easing: "easeOutQuart" },
       plugins: {
-        legend: { display: false },
+        legend: { display: true, labels: { color: colorMuted, boxWidth: 12, font: { size: 11 } } },
         tooltip: {
           backgroundColor: style.getPropertyValue("--color-surface-2").trim(),
           titleColor: colorText,
@@ -121,8 +153,16 @@
           grid: { color: colorDivider },
         },
         y: {
+          title: { display: true, text: "Strength (kg)", color: colorMuted, font: { size: 11 } },
           ticks: { color: colorMuted, font: { size: 11 }, stepSize: 1 },
           grid: { color: colorDivider },
+          beginAtZero: true,
+        },
+        y1: {
+          position: "right",
+          title: { display: true, text: "Cardio Load", color: colorMuted, font: { size: 11 } },
+          ticks: { color: colorMuted, font: { size: 11 } },
+          grid: { drawOnChartArea: false },
           beginAtZero: true,
         },
       },

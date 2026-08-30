@@ -16,6 +16,16 @@
 
 <body>
   <script>
+    // Delegated delete-confirm: forms with data-confirm="…" ask before
+    // submitting. Kept out of inline onclick so dynamic values can't be
+    // interpolated into JS.
+    document.addEventListener('submit', (e) => {
+      const msg = e.target instanceof HTMLFormElement ? e.target.dataset.confirm : null;
+      if (msg && !window.confirm(msg)) {
+        e.preventDefault();
+      }
+    });
+
     document.addEventListener('DOMContentLoaded', () => {
       // Only suppress Enter on multi-row logging forms (marked with
       // data-suppress-enter); every other form (login, name fields, …)
@@ -87,6 +97,13 @@
       </svg>
       Sessions
     </a>
+    <a href="/cardio" class="nav-link {% if path == '/cardio' %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M13 4l3 3-8 8-3 5 5-3 8-8 3 3" />
+        <path d="M5 20l2-2" />
+      </svg>
+      Cardio
+    </a>
     <a href="/progression" class="nav-link {% if path.startswith('/progression') %}active{% endif %}">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
@@ -112,6 +129,13 @@
 
     {% if user %}
     <div class="nav-section-label" style="margin-top: var(--space-4);">Account</div>
+    <a href="/profile" class="nav-link {% if path.startswith('/profile') %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </svg>
+      Profile
+    </a>
     <div class="sidebar-user">
       <span class="sidebar-username">{{ user.username }}</span>
       <form method="post" action="/logout" style="display:inline">
