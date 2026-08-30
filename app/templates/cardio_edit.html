@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Edit Cardio — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Edit Cardio</h1>
+  <p class="page-subtitle">{{ activity.activity_type }} on {{ activity.session.date }}</p>
+</div>
+
+<div class="card" style="max-width: 640px;">
+  <div class="card-title">Edit Activity</div>
+  <form method="post" action="/cardio/{{ activity.id }}">
+    <div class="form-group">
+      <label for="activity_type">Activity</label>
+      <select id="activity_type" name="activity_type" required>
+        {% set opts = ["running", "swimming", "cycling", "walking", "rowing", "other"] %}
+        {% if activity.activity_type not in opts %}
+        <option value="{{ activity.activity_type }}" selected>{{ activity.activity_type | capitalize }}</option>
+        {% endif %}
+        {% for opt in opts %}
+        <option value="{{ opt }}" {% if activity.activity_type == opt %}selected{% endif %}>{{ opt | capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="date">Date</label>
+      <input type="date" id="date" name="date" value="{{ activity.session.date.isoformat() }}" required />
+    </div>
+    <div class="form-group">
+      <label for="distance_km">Distance (km)</label>
+      <input type="number" id="distance_km" name="distance_km" step="0.01" min="0" value="{{ activity.distance_km if activity.distance_km is not none else '' }}" />
+    </div>
+    <div class="form-group">
+      <label for="duration_min">Duration (minutes or mm:ss)</label>
+      <input type="text" id="duration_min" name="duration_min" value="{{ _cardio_duration_value(activity) }}" />
+    </div>
+    <div class="form-group">
+      <label for="notes">Notes (optional)</label>
+      <textarea id="notes" name="notes" rows="2" placeholder="Feeling, route, heart rate…">{{ activity.notes or "" }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+    <a href="/cardio" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
+  </form>
+</div>
+{% endblock %}

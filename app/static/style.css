@@ -632,6 +632,12 @@ table tbody tr:hover {
   color: var(--color-gold);
 }
 
+.badge-cardio {
+  background: oklch(from var(--color-blue) l c h / 0.15);
+  color: var(--color-blue);
+  text-transform: capitalize;
+}
+
 /* ── Session logging grid ───────────────────────────────────────────────── */
 .exercise-block {
   background: var(--color-surface-offset);

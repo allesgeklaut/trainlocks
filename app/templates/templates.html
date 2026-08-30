@@ -28,8 +28,9 @@
   <div class="card">
     <div class="section-header">
       <span class="card-title" style="margin-bottom:0">{{ tpl.name }}</span>
-      <form method="post" action="/templates/{{ tpl.id }}/delete" style="display:inline">
-        <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete template {{ tpl.name }}?')">Delete</button>
+      <form method="post" action="/templates/{{ tpl.id }}/delete" style="display:inline"
+        data-confirm="Delete template {{ tpl.name }}?">
+        <button type="submit" class="btn btn-danger btn-sm">Delete</button>
       </form>
     </div>
 

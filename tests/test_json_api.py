@@ -162,3 +162,407 @@ def test_create_session_browser_still_redirects(client):
     }, follow_redirects=False)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/sessions"
+
+
+# ---------- Cardio API ----------
+
+def _cardio_payload(**overrides):
+    payload = {
+        "activity_type": "running",
+        "distance_km": 5,
+        "duration_min": 30,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_api_cardio_create_list_detail_delete(client):
+    resp = client.post("/api/cardio", json=_cardio_payload())
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["activity_type"] == "running"
+    assert body["distance_km"] == 5
+    assert body["duration_min"] == 30
+    assert body["pace"] == pytest.approx(6.0)
+    assert body["pace_unit"] == "km"
+    assert "id" in body and "session_id" in body
+
+    resp = client.get("/api/cardio")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) == 1
+    assert items[0]["id"] == body["id"]
+
+    resp = client.get(f"/api/cardio/{body['id']}")
+    assert resp.status_code == 200
+    assert resp.json()["activity_type"] == "running"
+
+    resp = client.delete(f"/api/cardio/{body['id']}")
+    assert resp.status_code == 200
+
+    assert client.get("/api/cardio").json() == []
+    assert client.get(f"/api/cardio/{body['id']}").status_code == 404
+    assert client.delete(f"/api/cardio/{body['id']}").status_code == 404
+
+
+def test_api_cardio_requires_type_and_values(client):
+    assert client.post("/api/cardio", json={}).status_code == 400
+    assert client.post("/api/cardio", json={"activity_type": "running"}).status_code == 400
+    assert client.post("/api/cardio", json={"activity_type": "", "distance_km": 5}).status_code == 400
+    assert client.post("/api/cardio", json={"activity_type": "running", "distance_km": "abc"}).status_code == 400
+    assert client.post("/api/cardio", json={"activity_type": "running", "duration_min": -1}).status_code == 400
+    # invalid mm:ss -> 400
+    assert client.post("/api/cardio", json={"activity_type": "running", "duration_min": "12:75"}).status_code == 400
+
+
+def test_api_cardio_duration_minutes_seconds(client):
+    resp = client.post("/api/cardio", json={"activity_type": "running", "duration_min": "44:51"})
+    assert resp.status_code == 201
+    # 44:51 -> 44 + 51/60 minutes
+    assert resp.json()["duration_min"] == pytest.approx(44 + 51 / 60)
+
+
+def test_api_cardio_invalid_date(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(date="nope"))
+    assert resp.status_code == 400
+
+
+def test_api_cardio_requires_session(client):
+    # no session exists yet for today; cardio create must find-or-create it
+    before = client.get("/api/sessions").json()
+    client.post("/api/cardio", json=_cardio_payload())
+    after = client.get("/api/sessions").json()
+    assert len(after) == len(before) + 1
+
+
+def test_api_cardio_attached_to_session_by_date(client):
+    before = len(client.get("/api/sessions").json())
+    resp = client.post("/api/cardio", json=_cardio_payload(distance_km=1, duration_min=20))
+    first_id = resp.json()["session_id"]
+    resp = client.post("/api/cardio", json=_cardio_payload(activity_type="swimming", distance_km=1, duration_min=20))
+    second_id = resp.json()["session_id"]
+    # same date -> same underlying session
+    assert first_id == second_id
+    assert len(client.get("/api/sessions").json()) == before + 1
+
+    resp = client.get(f"/api/sessions/{first_id}")
+    assert resp.status_code == 200
+    cardio = resp.json()["cardio"]
+    assert [a["activity_type"] for a in cardio] == ["running", "swimming"]
+
+
+def test_api_cardio_swimming_pace_per_100m(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(activity_type="swimming", distance_km=1, duration_min=20))
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["activity_type"] == "swimming"
+    # 1 km in 20 min => 10 x 100m => 2.0 min per 100m
+    assert body["pace"] == pytest.approx(2.0)
+    assert body["pace_unit"] == "100m"
+    # detail endpoint agrees
+    detail = client.get(f"/api/cardio/{body['id']}").json()
+    assert detail["pace"] == pytest.approx(2.0)
+    assert detail["pace_unit"] == "100m"
+
+
+def test_api_session_list_includes_cardio(client):
+    client.post("/api/cardio", json=_cardio_payload())
+    resp = client.get("/api/sessions")
+    assert resp.status_code == 200
+    sessions = resp.json()
+    assert len(sessions) == 1
+    assert len(sessions[0]["cardio"]) == 1
+    assert sessions[0]["cardio"][0]["activity_type"] == "running"
+
+
+def test_api_cardio_bad_delete(client):
+    assert client.delete("/api/cardio/99999").status_code == 404
+
+
+def test_cardio_edit_prefills_existing_values(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(notes="morning tempo run"))
+    assert resp.status_code == 201
+    cardio_id = resp.json()["id"]
+
+    resp = client.get(f"/cardio/{cardio_id}/edit")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "morning tempo run" in html
+    assert 'value="5.0"' in html
+    assert 'value="30"' in html
+    assert '<option value="running" selected' in html
+
+
+def test_cardio_edit_saves_without_losing_notes(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(notes="morning tempo run"))
+    cardio_id = resp.json()["id"]
+
+    resp = client.post(
+        f"/cardio/{cardio_id}",
+        data={
+            "activity_type": "running",
+            "date": "2026-08-29",
+            "distance_km": "5",
+            "duration_min": "30",
+            "notes": "morning tempo run, felt easy",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert resp.headers["location"] == "/cardio"
+
+    detail = client.get(f"/api/cardio/{cardio_id}").json()
+    assert detail["notes"] == "morning tempo run, felt easy"
+    assert detail["distance_km"] == 5
+    assert detail["duration_min"] == 30
+    assert detail["activity_type"] == "running"
+
+
+def test_cardio_edit_bad_id_and_validation(client):
+    assert client.get("/cardio/99999/edit").status_code == 404
+    assert client.post("/cardio/99999", data={}).status_code == 404
+    resp = client.post("/api/cardio", json=_cardio_payload())
+    cardio_id = resp.json()["id"]
+    # no distance and no duration -> 400, existing values untouched
+    assert client.post(f"/cardio/{cardio_id}", data={
+        "activity_type": "running",
+    }).status_code == 400
+    assert client.get(f"/api/cardio/{cardio_id}").json()["notes"] is None
+
+
+def test_cardio_form_duration_minutes_seconds(client):
+    resp = client.post("/cardio", data={
+        "activity_type": "Running", "duration_min": "44:51",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+    resp = client.get("/cardio")
+    assert "44:51" in resp.text
+
+
+def test_cardio_form_duration_validation(client):
+    for bad in ("12:75", "abc", "-5"):
+        resp = client.post("/cardio", data={
+            "activity_type": "running", "duration_min": bad,
+        }, follow_redirects=False)
+        assert resp.status_code == 400
+
+
+def test_cardio_edit_prefills_duration_seconds(client):
+    client.post("/cardio", data={
+        "activity_type": "running", "duration_min": "44:51",
+    }, follow_redirects=False)
+    resp = client.get("/cardio/1/edit")
+    assert 'value="44:51"' in resp.text
+
+
+def test_dashboard_cardio_load_scales_by_activity(client):
+    # 5 km run (x1) + 1 km swim (x3) -> weekly cardio load of 8.0
+    client.post("/api/cardio", json=_cardio_payload(activity_type="running", distance_km=5))
+    client.post("/api/cardio", json=_cardio_payload(activity_type="swimming", distance_km=1))
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '"cardio_load": 8.0' in resp.text
+    assert "Cardio Load" in resp.text
+
+
+def test_dashboard_bodyweight_load_scaling(client):
+    bench_id, pull_id, tpl_id, resp = _seed(client)
+    assert resp.status_code == 201
+    # Bench: 80*10 + 82.5*8 = 1460 (recorded weight).
+    # Pull-ups (bodyweight, no added weight): 6 reps x 80 default bodyweight = 480.
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '"load": 1940.0' in resp.text
+
+    # Adding 10 kg (vest/belt) raises the pull-up set to (80 + 10) x 6 = 540.
+    db = SessionLocal()
+    sess = db.query(models.WorkoutSession).filter_by(date=date(2026, 8, 25)).first()
+    pull_set = [s for s in sess.sets if s.exercise_id == pull_id][0]
+    pull_set.weight = 10
+    db.commit()
+    db.close()
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert '"load": 2000.0' in resp.text
+
+
+def test_profile_bodyweight(client):
+    bench_id, pull_id, tpl_id, resp = _seed(client)
+    assert resp.status_code == 201
+    resp = client.get("/profile")
+    assert resp.status_code == 200
+    assert 'name="bodyweight"' in resp.text
+
+    # Setting bodyweight to 78 changes the pull-up set from 6 x 80 to 6 x 78 = 468.
+    resp = client.post("/profile", data={"bodyweight": "78"}, follow_redirects=False)
+    assert resp.status_code == 303
+    resp = client.get("/profile")
+    assert 'value="78.0"' in resp.text
+    resp = client.get("/")
+    assert '"load": 1928.0' in resp.text
+
+
+def test_sessions_overview_shows_cardio_notes(client):
+    resp = client.post("/api/cardio", json=_cardio_payload(
+        activity_type="swimming", notes="swam at the pool, 6x200m"))
+    assert resp.status_code == 201
+    cardio_id = resp.json()["id"]
+
+    resp = client.get("/sessions")
+    assert resp.status_code == 200
+    assert "swam at the pool, 6x200m" in resp.text
+    assert f"/cardio/{cardio_id}/edit" in resp.text
+    # cardio-only session: the row's main Edit button opens the cardio edit
+    assert f'<a href="/cardio/{cardio_id}/edit" class="btn-icon" title="Edit">' in resp.text
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "swam at the pool, 6x200m" in resp.text
+
+
+def test_sessions_overview_edit_button_routing(client):
+    # Strength session + cardio: main Edit button stays on the session edit.
+    bench_id, _, _, resp = _seed(client)
+    assert resp.status_code == 201
+    session_id = resp.json()["id"]
+    client.post("/api/cardio", json=_cardio_payload(date="2026-08-25"))
+
+    resp = client.get("/sessions")
+    assert resp.status_code == 200
+    assert f'/sessions/edit/{session_id}" class="btn-icon" title="Edit"' in resp.text
+
+
+def test_view_session_edit_button_routing(client):
+    # Cardio-only session: detail page Edit button opens the cardio edit.
+    resp = client.post("/api/cardio", json=_cardio_payload(notes="morning tempo run"))
+    cardio_id = resp.json()["id"]
+    session_id = resp.json()["session_id"]
+
+    resp = client.get(f"/sessions/{session_id}")
+    assert resp.status_code == 200
+    assert f'<a href="/cardio/{cardio_id}/edit" class="btn btn-primary">Edit</a>' in resp.text
+
+
+# ---------- Orphaned session pruning ----------
+
+def test_api_cardio_delete_prunes_orphaned_session(client):
+    """Deleting the only cardio activity must also remove the session that
+    was auto-created for it, instead of leaving an empty row behind."""
+    resp = client.post("/api/cardio", json=_cardio_payload())
+    body = resp.json()
+    session_id = body["session_id"]
+
+    assert client.delete(f"/api/cardio/{body['id']}").status_code == 200
+    assert client.get(f"/api/sessions/{session_id}").status_code == 404
+    assert client.get("/api/sessions").json() == []
+
+
+def test_form_cardio_delete_prunes_orphaned_session(client):
+    resp = client.post("/api/cardio", json=_cardio_payload())
+    body = resp.json()
+    session_id = body["session_id"]
+
+    resp = client.post(f"/cardio/{body['id']}/delete", follow_redirects=False)
+    assert resp.status_code == 303
+    assert client.get(f"/api/sessions/{session_id}").status_code == 404
+
+
+def test_cardio_delete_keeps_session_with_sets(client):
+    """A session created explicitly (with sets) must survive the deletion of
+    its cardio activity — pruning only targets auto-created empty ones."""
+    bench_id, _, _, resp = _seed(client)
+    session_id = resp.json()["id"]
+
+    resp = client.post("/api/cardio", json=_cardio_payload(session_id=session_id))
+    cardio_id = resp.json()["id"]
+    client.delete(f"/api/cardio/{cardio_id}")
+
+    assert client.get(f"/api/sessions/{session_id}").status_code == 200
+
+
+def test_form_cardio_delete_keeps_session_with_sets(client):
+    bench_id, _, _, resp = _seed(client)
+    session_id = resp.json()["id"]
+
+    resp = client.post("/api/cardio", json=_cardio_payload(session_id=session_id))
+    cardio_id = resp.json()["id"]
+    client.post(f"/cardio/{cardio_id}/delete", follow_redirects=False)
+
+    assert client.get(f"/api/sessions/{session_id}").status_code == 200
+
+
+def test_cardio_redate_prunes_old_auto_session(client):
+    """Re-dating a cardio activity to a day with no other sets must remove
+    the now-empty session on the old date and keep the new one."""
+    resp = client.post("/api/cardio", json=_cardio_payload(date="2026-08-25"))
+    body = resp.json()
+    old_session_id = body["session_id"]
+
+    resp = client.post(f"/cardio/{body['id']}", data={
+        "activity_type": "running",
+        "date": "2026-08-26",
+        "distance_km": "5",
+        "duration_min": "30",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+
+    assert client.get(f"/api/sessions/{old_session_id}").status_code == 404
+    sessions = client.get("/api/sessions").json()
+    assert len(sessions) == 1
+    assert sessions[0]["date"] == "2026-08-26"
+
+
+def test_cardio_same_date_update_keeps_session(client):
+    """Saving an edit without changing the date must not delete the session."""
+    resp = client.post("/api/cardio", json=_cardio_payload(date="2026-08-25"))
+    body = resp.json()
+    session_id = body["session_id"]
+
+    resp = client.post(f"/cardio/{body['id']}", data={
+        "activity_type": "running",
+        "date": "2026-08-25",
+        "distance_km": "6",
+        "duration_min": "35",
+    }, follow_redirects=False)
+    assert resp.status_code == 303
+    assert client.get(f"/api/sessions/{session_id}").status_code == 200
+
+
+# ---------- Validation tightening ----------
+
+def test_cardio_activity_type_allowlist(client):
+    # Unknown types are rejected by both the API and the form route.
+    assert client.post(
+        "/api/cardio", json=_cardio_payload(activity_type="frog jumps")
+    ).status_code == 400
+    assert client.post(
+        "/cardio",
+        data={"activity_type": "frog jumps", "distance_km": "5", "duration_min": "30"},
+        follow_redirects=False,
+    ).status_code == 400
+    # Every documented type is accepted; input is case-insensitive.
+    for t in ("running", "swimming", "cycling", "walking", "rowing", "other"):
+        assert client.post(
+            "/api/cardio", json=_cardio_payload(activity_type=t.upper())
+        ).status_code == 201
+
+
+def test_cardio_form_rejects_negative_distance(client):
+    """POST /cardio must apply the same distance_km >= 0 check as the API."""
+    resp = client.post("/cardio", data={
+        "activity_type": "running", "distance_km": "-5", "duration_min": "30",
+    }, follow_redirects=False)
+    assert resp.status_code == 400
+
+
+def test_profile_bodyweight_rejects_zero_nan_inf(client):
+    """0, NaN and inf are not meaningful bodyweights and would poison the
+    load math (0 via the `or` default, NaN by propagating)."""
+    for raw in ("0", "0.0", "-1", "nan", "inf", "-inf", "Infinity"):
+        resp = client.post("/profile", data={"bodyweight": raw}, follow_redirects=False)
+        assert resp.status_code == 400, f"bodyweight={raw!r} was accepted"
+
+    # A valid value still saves.
+    resp = client.post("/profile", data={"bodyweight": "72.5"}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert 'value="72.5"' in client.get("/profile").text
