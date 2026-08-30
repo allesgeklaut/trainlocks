@@ -7,6 +7,7 @@ from datetime import date
 from typing import Generator, Optional
 import httpx
 import json
+import math
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -107,6 +108,9 @@ templates.env.globals["_cardio_pace_display"] = _cardio_pace_display
 
 # Dashboard cardio load: per-activity effort multiplier applied to distance (km).
 CARDIO_LOAD_FACTOR = {"running": 1.0, "swimming": 3.0}
+# Canonical activity types accepted by the form and API routes; must match
+# the <option> lists in cardio.html / cardio_edit.html.
+CARDIO_ACTIVITY_TYPES = ("running", "swimming", "cycling", "walking", "rowing", "other")
 # Fallback for bodyweight-exercise load scaling when the user hasn't set a
 # bodyweight in their profile.
 BODYWEIGHT_DEFAULT_KG = 80.0
@@ -180,6 +184,23 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+
+def _prune_empty_session(db: Session, session: Optional[models.WorkoutSession]) -> None:
+    """Delete a workout session that has neither sets nor cardio left.
+
+    Sessions auto-created for cardio would otherwise linger as empty rows
+    after the activity is deleted or moved to another date. Sessions with a
+    template (explicitly created from /sessions/new) are never pruned.
+    """
+    if session is None or session.id is None or session.template_id is not None:
+        return
+    # Flush pending cardio deletes / session_id moves so the lazy-loaded
+    # collections below reflect them (autoflush is off).
+    db.flush()
+    db.refresh(session)
+    if not session.sets and not session.cardio:
+        db.delete(session)
 
 
 async def fetch_exercise_db() -> list:
@@ -270,8 +291,10 @@ async def profile_update(
         bodyweight = float(raw) if raw is not None and str(raw).strip() else None
     except ValueError:
         raise HTTPException(status_code=400, detail="bodyweight must be a number in kg")
-    if bodyweight is not None and bodyweight < 0:
-        raise HTTPException(status_code=400, detail="bodyweight must be >= 0")
+    # Reject 0 (not a meaningful bodyweight) and nan/inf, which float() accepts
+    # and which would poison downstream load math.
+    if bodyweight is not None and not (bodyweight > 0 and math.isfinite(bodyweight)):
+        raise HTTPException(status_code=400, detail="bodyweight must be a positive number in kg")
     # user comes from get_current_user's own session; persist via the route's.
     db.get(models.User, user.id).bodyweight = bodyweight
     db.commit()
@@ -319,22 +342,18 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
         .all()
     )
     weekly_cardio_load = defaultdict(float)
-    weekly_cardio_min = defaultdict(float)
     for a in cardio_activities:
         iso = a.session.date.isocalendar()
         week_key = f"{iso[0]}-W{iso[1]:02d}"
         if a.distance_km:
             weekly_cardio_load[week_key] += a.distance_km * _cardio_load_factor(a.activity_type)
-        if a.duration_min:
-            weekly_cardio_min[week_key] += a.duration_min
 
-    all_weeks = sorted(set(weekly_load) | set(weekly_cardio_load) | set(weekly_cardio_min))
+    all_weeks = sorted(set(weekly_load) | set(weekly_cardio_load))
     weekly_data = [
         {
             "date": k,
             "load": round(weekly_load.get(k, 0.0), 0),
             "cardio_load": round(weekly_cardio_load.get(k, 0.0), 1),
-            "cardio_min": round(weekly_cardio_min.get(k, 0.0), 0),
         }
         for k in all_weeks
     ]
@@ -738,6 +757,11 @@ async def cardio_create(
     activity_type = (form.get("activity_type") or "").strip().lower()
     if not activity_type:
         raise HTTPException(status_code=400, detail="activity_type is required")
+    if activity_type not in CARDIO_ACTIVITY_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"activity_type must be one of: {', '.join(CARDIO_ACTIVITY_TYPES)}",
+        )
 
     def _to_float(v):
         if v is None or v == "":
@@ -752,6 +776,8 @@ async def cardio_create(
         duration_min = _parse_duration_min(form.get("duration_min"))
     except ValueError:
         raise HTTPException(status_code=400, detail="duration must be minutes (e.g. 45) or M:SS (e.g. 44:51)")
+    if distance_km is not None and distance_km < 0:
+        raise HTTPException(status_code=400, detail="distance must be >= 0")
     if duration_min is not None and duration_min < 0:
         raise HTTPException(status_code=400, detail="duration must be >= 0")
     if (distance_km is None or distance_km == 0) and duration_min is None:
@@ -814,6 +840,11 @@ async def cardio_update(
     activity_type = (form.get("activity_type") or "").strip().lower()
     if not activity_type:
         raise HTTPException(status_code=400, detail="activity_type is required")
+    if activity_type not in CARDIO_ACTIVITY_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"activity_type must be one of: {', '.join(CARDIO_ACTIVITY_TYPES)}",
+        )
 
     def _to_float(v):
         if v is None or v == "":
@@ -828,6 +859,8 @@ async def cardio_update(
         duration_min = _parse_duration_min(form.get("duration_min"))
     except ValueError:
         raise HTTPException(status_code=400, detail="duration must be minutes (e.g. 45) or M:SS (e.g. 44:51)")
+    if distance_km is not None and distance_km < 0:
+        raise HTTPException(status_code=400, detail="distance must be >= 0")
     if duration_min is not None and duration_min < 0:
         raise HTTPException(status_code=400, detail="duration must be >= 0")
     if (distance_km is None or distance_km == 0) and duration_min is None:
@@ -839,6 +872,7 @@ async def cardio_update(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date")
 
+    old_session = c.session
     sess = (
         db.query(models.WorkoutSession)
         .filter(models.WorkoutSession.date == activity_date)
@@ -854,6 +888,9 @@ async def cardio_update(
     c.distance_km = distance_km
     c.duration_min = duration_min
     c.notes = form.get("notes") or None
+    # Moving the activity to another date can leave its previous auto-created
+    # session empty; prune it so /sessions doesn't accumulate orphan rows.
+    _prune_empty_session(db, old_session)
     db.commit()
     return RedirectResponse(url="/cardio", status_code=303)
 
@@ -867,7 +904,9 @@ async def cardio_delete(
     c = db.get(models.CardioActivity, cardio_id)
     if not c:
         raise HTTPException(status_code=404, detail="Cardio activity not found")
+    owning_session = c.session
     db.delete(c)
+    _prune_empty_session(db, owning_session)
     db.commit()
     return RedirectResponse(url="/cardio", status_code=303)
 
@@ -1098,6 +1137,11 @@ async def api_create_cardio(
     activity_type = (get("activity_type") or "").strip().lower()
     if not activity_type:
         raise HTTPException(status_code=400, detail="activity_type is required")
+    if activity_type not in CARDIO_ACTIVITY_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"activity_type must be one of: {', '.join(CARDIO_ACTIVITY_TYPES)}",
+        )
 
     def _to_float(v):
         if v is None or v == "":
@@ -1176,7 +1220,9 @@ async def api_delete_cardio(
     c = db.get(models.CardioActivity, cardio_id)
     if not c:
         raise HTTPException(status_code=404, detail="Cardio activity not found")
+    owning_session = c.session
     db.delete(c)
+    _prune_empty_session(db, owning_session)
     db.commit()
     return JSONResponse({"deleted": cardio_id})
 

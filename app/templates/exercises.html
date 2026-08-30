@@ -45,8 +45,9 @@
               {% endif %}
             </td>
             <td>
-              <form method="post" action="/exercises/{{ ex.id }}/delete" style="display:inline">
-                <button type="submit" class="btn btn-danger btn-sm" onclick="return confirm('Delete {{ ex.name }}?')">Delete</button>
+              <form method="post" action="/exercises/{{ ex.id }}/delete" style="display:inline"
+                data-confirm="Delete {{ ex.name }}?">
+                <button type="submit" class="btn btn-danger btn-sm">Delete</button>
               </form>
             </td>
           </tr>

@@ -16,7 +16,7 @@
   <form method="post" action="/profile">
     <div class="form-group">
       <label for="bodyweight">Bodyweight (kg)</label>
-      <input type="number" step="0.5" min="0" id="bodyweight" name="bodyweight"
+      <input type="number" step="0.5" min="0.5" id="bodyweight" name="bodyweight"
         value="{{ user.bodyweight if user.bodyweight is not none else '' }}" placeholder="e.g. 80" />
       <p class="text-muted" style="font-size:var(--text-sm)">
         Used to scale bodyweight exercises (pull-ups, dips, ...) in the load graph:
