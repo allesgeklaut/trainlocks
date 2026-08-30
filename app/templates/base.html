@@ -16,6 +16,16 @@
 
 <body>
   <script>
+    // Delegated delete-confirm: forms with data-confirm="…" ask before
+    // submitting. Kept out of inline onclick so dynamic values can't be
+    // interpolated into JS.
+    document.addEventListener('submit', (e) => {
+      const msg = e.target instanceof HTMLFormElement ? e.target.dataset.confirm : null;
+      if (msg && !window.confirm(msg)) {
+        e.preventDefault();
+      }
+    });
+
     document.addEventListener('DOMContentLoaded', () => {
       // Only suppress Enter on multi-row logging forms (marked with
       // data-suppress-enter); every other form (login, name fields, …)
