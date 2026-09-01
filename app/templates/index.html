@@ -7,18 +7,18 @@
 </div>
 
 <div class="kpi-grid">
-  <div class="kpi-card">
+  <a href="/sessions" class="kpi-card">
     <div class="kpi-label">Total Sessions</div>
     <div class="kpi-value">{{ session_count }}</div>
-  </div>
-  <div class="kpi-card">
+  </a>
+  <a href="/exercises" class="kpi-card">
     <div class="kpi-label">Exercises</div>
     <div class="kpi-value">{{ exercise_count }}</div>
-  </div>
-  <div class="kpi-card">
+  </a>
+  <a href="/templates" class="kpi-card">
     <div class="kpi-label">Templates</div>
     <div class="kpi-value">{{ template_count }}</div>
-  </div>
+  </a>
 </div>
 
 <div class="card">
@@ -26,7 +26,7 @@
     <span class="section-title">Weekly Load (Last 12 Weeks)</span>
   </div>
   {% if weekly_activity %}
-  <div style="height:200px;position:relative;">
+  <div class="chart-box">
     <canvas id="activityChart"></canvas>
   </div>
   {% else %}
@@ -101,10 +101,12 @@
   const colorDivider  = style.getPropertyValue("--color-divider").trim();
 
   const ctx = document.getElementById("activityChart").getContext("2d");
+  const isCompact = window.matchMedia("(max-width: 768px)").matches;
+  const shortLabel = l => l.replace(/^\d{4}-W/, "W");
   new Chart(ctx, {
     type: "line",
     data: {
-      labels: activityData.map(d => d.date),
+      labels: activityData.map(d => isCompact ? shortLabel(d.date) : d.date),
       datasets: [{
         label: "Strength Load (kg)",
         data: activityData.map(d => d.load),
@@ -137,7 +139,15 @@
       maintainAspectRatio: false,
       animation: { duration: 700, easing: "easeOutQuart" },
       plugins: {
-        legend: { display: true, labels: { color: colorMuted, boxWidth: 12, font: { size: 11 } } },
+        legend: {
+          display: true,
+          labels: {
+            color: colorMuted,
+            boxWidth: 12,
+            font: { size: isCompact ? 10 : 11 },
+            padding: isCompact ? 8 : 12,
+          }
+        },
         tooltip: {
           backgroundColor: style.getPropertyValue("--color-surface-2").trim(),
           titleColor: colorText,
@@ -149,19 +159,36 @@
       },
       scales: {
         x: {
-          ticks: { color: colorMuted, font: { size: 11 } },
+          ticks: {
+            color: colorMuted,
+            font: { size: isCompact ? 9 : 11 },
+            maxRotation: isCompact ? 45 : 0,
+            minRotation: isCompact ? 45 : 0,
+            autoSkip: true,
+            maxTicksLimit: isCompact ? 6 : 12,
+          },
           grid: { color: colorDivider },
         },
         y: {
-          title: { display: true, text: "Strength (kg)", color: colorMuted, font: { size: 11 } },
-          ticks: { color: colorMuted, font: { size: 11 }, stepSize: 1 },
+          title: { display: !isCompact, text: "Strength (kg)", color: colorMuted, font: { size: 11 } },
+          ticks: {
+            color: colorMuted,
+            font: { size: isCompact ? 9 : 11 },
+            stepSize: 1,
+            maxTicksLimit: isCompact ? 5 : undefined,
+            callback: isCompact ? v => Intl.NumberFormat("en", { notation: "compact" }).format(v) : undefined,
+          },
           grid: { color: colorDivider },
           beginAtZero: true,
         },
         y1: {
           position: "right",
-          title: { display: true, text: "Cardio Load", color: colorMuted, font: { size: 11 } },
-          ticks: { color: colorMuted, font: { size: 11 } },
+          title: { display: !isCompact, text: "Cardio Load", color: colorMuted, font: { size: 11 } },
+          ticks: {
+            color: colorMuted,
+            font: { size: isCompact ? 9 : 11 },
+            maxTicksLimit: isCompact ? 5 : undefined,
+          },
           grid: { drawOnChartArea: false },
           beginAtZero: true,
         },
