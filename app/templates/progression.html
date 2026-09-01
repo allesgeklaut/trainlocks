@@ -113,8 +113,9 @@
     },
     scales: {
       x: {
-        // Bars would otherwise be clipped in half at the chart edges
-        // (dataset clip region = chartArea, no overhang allowance).
+        // Bars already default to offset; this insets the line chart's
+        // first/last points by half a category width so they align with
+        // the bar categories.
         offset: true,
         ticks: {
           color: colorMuted,
