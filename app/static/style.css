@@ -1009,6 +1009,10 @@ table tbody tr:hover {
     height: 240px;
   }
 
+  .chart-container {
+    height: 240px;
+  }
+
   .card {
     padding: var(--space-4);
   }
