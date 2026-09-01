@@ -312,10 +312,12 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
     # Training load data for dashboard chart (last 12 weeks)
     from datetime import timedelta
     from collections import defaultdict
-    twelve_weeks_ago = date.today() - timedelta(weeks=12)
+    # Monday of the current week; chart spans exactly 12 Monday-aligned weeks.
+    current_monday = date.today() - timedelta(days=date.today().weekday())
+    week_start = current_monday - timedelta(weeks=11)
     recent_sessions_full = (
         db.query(models.WorkoutSession)
-        .filter(models.WorkoutSession.date >= twelve_weeks_ago)
+        .filter(models.WorkoutSession.date >= week_start)
         .order_by(models.WorkoutSession.date)
         .all()
     )
@@ -338,7 +340,7 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
     cardio_activities = (
         db.query(models.CardioActivity)
         .join(models.WorkoutSession, models.CardioActivity.session_id == models.WorkoutSession.id)
-        .filter(models.WorkoutSession.date >= twelve_weeks_ago)
+        .filter(models.WorkoutSession.date >= week_start)
         .all()
     )
     weekly_cardio_load = defaultdict(float)
@@ -348,7 +350,16 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
         if a.distance_km:
             weekly_cardio_load[week_key] += a.distance_km * _cardio_load_factor(a.activity_type)
 
-    all_weeks = sorted(set(weekly_load) | set(weekly_cardio_load))
+    # Dense week axis so weeks without sessions show as zero instead of
+    # being skipped. ISO weeks (isocalendar) start on Monday. Exactly 12
+    # Monday-aligned buckets; empty series when there is no data so the
+    # template's "No training data yet" empty state stays reachable.
+    week_cursor = week_start
+    all_weeks = []
+    while week_cursor <= current_monday:
+        iso = week_cursor.isocalendar()
+        all_weeks.append(f"{iso[0]}-W{iso[1]:02d}")
+        week_cursor += timedelta(weeks=1)
     weekly_data = [
         {
             "date": k,
@@ -356,7 +367,7 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
             "cardio_load": round(weekly_cardio_load.get(k, 0.0), 1),
         }
         for k in all_weeks
-    ]
+    ] if (weekly_load or weekly_cardio_load) else []
     
     return templates.TemplateResponse(request, "index.html", {
         "recent_sessions": sessions,

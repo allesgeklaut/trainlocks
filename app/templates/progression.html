@@ -93,7 +93,8 @@
   // Charts only plot sessions that have a weight; the table above still
   // lists weight-less sessions (marked with —) so they aren't silently gone.
   const chartData = data.filter(r => r.has_weight);
-  const labels = chartData.map(r => r.date);
+  const isCompact = window.matchMedia("(max-width: 768px)").matches;
+  const labels = chartData.map(r => isCompact ? r.date.slice(5) : r.date);
 
   const baseOptions = {
     responsive: true,
@@ -112,11 +113,27 @@
     },
     scales: {
       x: {
-        ticks: { color: colorMuted, font: { size: 11 } },
+        // Bars already default to offset; this insets the line chart's
+        // first/last points by half a category width so they align with
+        // the bar categories.
+        offset: true,
+        ticks: {
+          color: colorMuted,
+          font: { size: isCompact ? 9 : 11 },
+          maxRotation: isCompact ? 45 : 0,
+          minRotation: isCompact ? 45 : 0,
+          autoSkip: true,
+          maxTicksLimit: isCompact ? 5 : undefined,
+        },
         grid: { color: colorDivider },
       },
       y: {
-        ticks: { color: colorMuted, font: { size: 11 } },
+        ticks: {
+          color: colorMuted,
+          font: { size: isCompact ? 9 : 11 },
+          maxTicksLimit: isCompact ? 5 : undefined,
+          callback: isCompact ? v => Intl.NumberFormat("en", { notation: "compact" }).format(v) : undefined,
+        },
         grid: { color: colorDivider },
         beginAtZero: false,
       },
