@@ -348,7 +348,16 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
         if a.distance_km:
             weekly_cardio_load[week_key] += a.distance_km * _cardio_load_factor(a.activity_type)
 
-    all_weeks = sorted(set(weekly_load) | set(weekly_cardio_load))
+    # Dense week axis so weeks without sessions show as zero instead of
+    # being skipped. ISO weeks (isocalendar) start on Monday.
+    current_monday = date.today() - timedelta(days=date.today().weekday())
+    week_cursor = twelve_weeks_ago - timedelta(days=twelve_weeks_ago.weekday())
+    all_weeks = []
+    while week_cursor <= current_monday:
+        iso = week_cursor.isocalendar()
+        all_weeks.append(f"{iso[0]}-W{iso[1]:02d}")
+        week_cursor += timedelta(weeks=1)
+    all_weeks = sorted(set(all_weeks) | set(weekly_load) | set(weekly_cardio_load))
     weekly_data = [
         {
             "date": k,
