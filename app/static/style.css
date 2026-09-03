@@ -278,8 +278,8 @@ textarea {
 
 .nav-link.active {
   background: linear-gradient(90deg,
-    oklch(from var(--color-primary) l c h / 0.12),
-    oklch(from var(--color-primary) l c h / 0.05) 70%, transparent);
+      oklch(from var(--color-primary) l c h / 0.12),
+      oklch(from var(--color-primary) l c h / 0.05) 70%, transparent);
   color: var(--color-primary);
   box-shadow: inset 0 0 0 1px oklch(from var(--color-primary) l c h / 0.15);
 }
