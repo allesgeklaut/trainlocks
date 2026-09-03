@@ -10,15 +10,15 @@
     </div>
     <div class="hero-stats">
       <div class="hero-stat">
-        <div class="hero-stat-value">{{ week_streak }}<span>×</span></div>
+        <div class="hero-stat-value"><span data-countup="{{ week_streak }}">{{ week_streak }}</span><span class="stat-unit" style="color:var(--color-primary)">×</span></div>
         <div class="hero-stat-label">week streak</div>
       </div>
       <div class="hero-stat">
-        <div class="hero-stat-value">{{ this_week_load }}</div>
+        <div class="hero-stat-value"><span data-countup="{{ this_week_load.replace(',', '') }}">{{ this_week_load }}</span></div>
         <div class="hero-stat-label">load this week</div>
       </div>
       <div class="hero-stat">
-        <div class="hero-stat-value">{{ total_volume_t }}</div>
+        <div class="hero-stat-value"><span data-countup="{{ total_volume_t.replace(',', '') }}" data-decimals="1">{{ total_volume_t }}</span></div>
         <div class="hero-stat-label">tonnes lifted</div>
       </div>
     </div>
@@ -43,18 +43,7 @@
   </a>
 </div>
 
-<div class="card">
-  <div class="section-header">
-    <span class="section-title">Weekly Load <span class="section-title-suffix">· last 12 weeks</span></span>
-  </div>
-  {% if weekly_activity %}
-  <div class="chart-box">
-    <canvas id="activityChart"></canvas>
-  </div>
-  {% else %}
-  <p class="text-muted" style="text-align:center;padding:var(--space-6)">No training data yet. Log your first session to see activity!</p>
-  {% endif %}
-</div>
+{% include "partials/weekly_load.html" %}
 
 <div class="card">
   <div class="section-header">
@@ -109,141 +98,28 @@
   {% endif %}
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <script>
+// Count-up hero stats: animate from 0 to the server-rendered value on load.
 (function() {
-  const activityData = {{ weekly_activity | tojson }};
-  if (activityData.length === 0) return;
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.querySelectorAll("[data-countup]").forEach(el => {
+    const target = parseFloat(el.dataset.countup);
+    const decimals = parseInt(el.dataset.decimals || "0", 10);
+    if (!isFinite(target) || reduced) return; // keep server value
 
-  const style = getComputedStyle(document.documentElement);
-  const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
-  const colorPrimary  = style.getPropertyValue("--color-primary").trim();
-  const colorBlue     = style.getPropertyValue("--color-blue").trim();
-  const colorDivider  = style.getPropertyValue("--color-divider").trim();
-  const colorSurface  = style.getPropertyValue("--color-surface").trim();
-  const colorText     = style.getPropertyValue("--color-text").trim();
-  const fontBody      = style.getPropertyValue("--font-body").trim();
+    const fmt = v => v.toLocaleString("en", {
+      minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+    });
+    const duration = 900;
+    const t0 = performance.now();
+    const ease = t => 1 - Math.pow(1 - t, 3); // easeOutCubic
 
-  const ctx = document.getElementById("activityChart").getContext("2d");
-  const isCompact = window.matchMedia("(max-width: 768px)").matches;
-  const shortLabel = l => l.replace(/^\d{4}-W/, "W");
-
-  // Soft vertical gradient under the strength curve (tracks the canvas height
-  // so the fade reaches fully transparent at the bottom edge, whatever the
-  // responsive .chart-box height is)
-  const strengthFill = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
-  strengthFill.addColorStop(0, colorPrimary + "3d");
-  strengthFill.addColorStop(1, colorPrimary + "00");
-
-  const tooltip = {
-    backgroundColor: colorSurface,
-    borderColor: colorDivider,
-    borderWidth: 1,
-    titleColor: colorText,
-    bodyColor: colorMuted,
-    titleFont: { family: fontBody, weight: "600", size: 12 },
-    bodyFont: { family: fontBody, size: 12 },
-    padding: 10,
-    cornerRadius: 10,
-    boxPadding: 4,
-    displayColors: true,
-  };
-
-  new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: activityData.map(d => isCompact ? shortLabel(d.date) : d.date.replace(/^\d{4}-W/, "W")),
-      datasets: [{
-        label: "Strength",
-        data: activityData.map(d => d.load),
-        yAxisID: "y",
-        borderColor: colorPrimary,
-        backgroundColor: strengthFill,
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        pointBackgroundColor: colorPrimary,
-        pointBorderColor: colorSurface,
-        pointBorderWidth: 2,
-        fill: true,
-        tension: 0.4,
-      }, {
-        label: "Cardio",
-        data: activityData.map(d => d.cardio_load),
-        yAxisID: "y1",
-        borderColor: colorBlue,
-        backgroundColor: "transparent",
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        pointBackgroundColor: colorBlue,
-        pointBorderColor: colorSurface,
-        pointBorderWidth: 2,
-        fill: false,
-        tension: 0.4,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
-      animation: { duration: 700, easing: "easeOutQuart" },
-      plugins: {
-        legend: {
-          display: true,
-          position: "top",
-          align: "end",
-          labels: {
-            color: colorMuted,
-            usePointStyle: true,
-            pointStyle: "circle",
-            boxWidth: 6,
-            boxHeight: 6,
-            font: { family: fontBody, size: isCompact ? 10 : 12 },
-            padding: isCompact ? 8 : 16,
-          }
-        },
-        tooltip: tooltip,
-      },
-      scales: {
-        x: {
-          ticks: {
-            color: colorMuted,
-            font: { size: isCompact ? 9 : 11 },
-            maxRotation: isCompact ? 45 : 0,
-            minRotation: isCompact ? 45 : 0,
-            autoSkip: true,
-            maxTicksLimit: isCompact ? 6 : 12,
-          },
-          grid: { display: false },
-          border: { display: false },
-        },
-        y: {
-          title: { display: !isCompact, text: "Strength (kg)", color: colorMuted, font: { size: 11 } },
-          ticks: {
-            color: colorMuted,
-            font: { size: isCompact ? 9 : 11 },
-            maxTicksLimit: isCompact ? 5 : 6,
-            callback: v => Intl.NumberFormat("en", { notation: "compact" }).format(v),
-          },
-          grid: { color: colorDivider },
-          border: { display: false },
-          beginAtZero: true,
-        },
-        y1: {
-          position: "right",
-          title: { display: !isCompact, text: "Cardio Load", color: colorMuted, font: { size: 11 } },
-          ticks: {
-            color: colorMuted,
-            font: { size: isCompact ? 9 : 11 },
-            maxTicksLimit: isCompact ? 5 : 6,
-          },
-          grid: { drawOnChartArea: false },
-          border: { display: false },
-          beginAtZero: true,
-        },
-      },
-    },
+    function frame(now) {
+      const p = Math.min((now - t0) / duration, 1);
+      el.textContent = fmt(target * ease(p));
+      if (p < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
   });
 })();
 </script>
