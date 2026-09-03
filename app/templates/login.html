@@ -82,7 +82,10 @@
   <script>
   (function(){
     const r = document.documentElement;
-    const d = matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light";
+    const saved = localStorage.getItem("theme");
+    const d = saved === "dark" || saved === "light"
+      ? saved
+      : (matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light");
     r.setAttribute("data-theme", d);
   })();
   </script>

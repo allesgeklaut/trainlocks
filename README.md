@@ -2,8 +2,11 @@
 
 FastAPI + SQLite strength training log with progression charts.
 
+![Dashboard screenshot](docs/screenshot-dashboard.png)
+
 ## Features
 
+- Dashboard with weekly load chart, training streak and lifetime tonnage
 - Define exercises (bodyweight or weighted)
 - Create session templates with ordered exercises and set counts
 - Log sessions from a template — enter reps and weight per set
