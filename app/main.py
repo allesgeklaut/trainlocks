@@ -974,15 +974,22 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
         .order_by(models.WorkoutSession.date)
         .all()
     )
+    bodyweight_kg = user.bodyweight or BODYWEIGHT_DEFAULT_KG
     rows = []
     for sess in sessions:
         sets = [s for s in sess.sets if s.exercise_id == exercise_id]
         if not sets:
             continue
+        exercise = sets[0].exercise
+        is_bodyweight = bool(exercise and exercise.is_bodyweight)
+        # Effective load per set: bodyweight lifts count bodyweight + any
+        # added kg (vest, belt); weighted lifts count the logged weight only.
+        base_kg = bodyweight_kg if is_bodyweight else 0.0
+
         # Separate weighted sets from bodyweight-only sets.
         weighted_sets = [s for s in sets if s.weight is not None]
-        bw_sets = [s for s in sets if s.weight is None and s.exercise.is_bodyweight]
-        
+        bw_sets = [s for s in sets if s.weight is None and is_bodyweight]
+
         # For bodyweight-only sessions (no weight at all), still include them
         # using total_reps as the primary metric.
         if weighted_sets:
@@ -1001,14 +1008,32 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
             has_weight = False
             top_weight = 0.0
             volume = 0.0
-        
+
+        # Effective (chartable) load and Epley estimated 1RM over the best
+        # set: w * (1 + reps/30). Bodyweight rows use effective load so the
+        # chart shows real load instead of a flat zero line.
+        if has_weight:
+            chartable = sets if is_bodyweight else weighted_sets
+            eff_loads = [base_kg + (s.weight or 0.0) for s in chartable]
+            eff_top = max(eff_loads)
+            est_1rm = max(
+                e * (1.0 + (s.reps or 0) / 30.0)
+                for e, s in zip(eff_loads, chartable)
+            )
+        else:
+            eff_top = 0.0
+            est_1rm = 0.0
+
         total_reps = sum(s.reps for s in sets)
         rows.append({
             "date": str(sess.date),
             "top_weight": round(top_weight, 2),
+            "effective_top_weight": round(eff_top, 1),
+            "est_1rm": round(est_1rm, 1),
             "volume": round(volume, 2),
             "total_reps": total_reps,
             "has_weight": has_weight,
+            "is_bodyweight": is_bodyweight,
         })
     return JSONResponse({"data": rows})
 

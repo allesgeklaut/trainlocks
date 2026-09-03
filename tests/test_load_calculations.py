@@ -64,6 +64,45 @@ def test_load_calculations_with_varied_weights(client):
     assert row["volume"] == 1400.0
     assert row["total_reps"] == 24
     assert row["has_weight"] is True
+    assert row["is_bodyweight"] is False
+
+    # Effective top equals plain top for weighted lifts (no BW add-on).
+    assert row["effective_top_weight"] == 70.0
+    # Epley 1RM per set: w * (1 + reps/30) → 50*(1+10/30)=66.67,
+    # 60*(1+8/30)=76.0, 70*(1+6/30)=84.0 → best is 84.0.
+    assert row["est_1rm"] == 84.0
+
+
+def test_progression_bodyweight_effective_load_and_1rm(client):
+    """Bodyweight exercises must report effective load (bodyweight + added
+    kg) so charts show real load instead of a flat zero line. Epley 1RM uses
+    the effective load."""
+    # Profile bodyweight: 70 kg (default 80 would also work, but be explicit).
+    client.post("/profile", data={"bodyweight": "70"})
+    client.post("/exercises", data={"name": "Pull Ups", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = db.query(models.Exercise).filter_by(name="Pull Ups").first()
+    ex_id = ex.id
+
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "8", f"weight-{ex_id}-1": "0",
+        f"reps-{ex_id}-2": "5", f"weight-{ex_id}-2": "10",
+    })
+
+    resp = client.get(f"/api/progression/{ex_id}")
+    assert resp.status_code == 200
+    row = resp.json()["data"][0]
+    assert row["is_bodyweight"] is True
+    assert row["has_weight"] is True
+    # Added-weight view stays unchanged for the raw top weight…
+    assert row["top_weight"] == 10.0
+    # …but effective load includes bodyweight: max(70+0, 70+10) = 80.
+    assert row["effective_top_weight"] == 80.0
+    # Epley on effective loads: 70*(1+8/30)=88.67, 80*(1+5/30)=93.33 → 93.33
+    # (rounded to 1 decimal by the API).
+    assert abs(row["est_1rm"] - 93.3) < 0.1
 
 def test_bodyweight_no_weight_shows_rep_count(client):
     """Body‑weight exercise with no weight should show rep count in volume and total_reps."""
