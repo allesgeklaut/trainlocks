@@ -1,29 +1,51 @@
 {% extends "base.html" %}
 {% block title %}Dashboard — Training Log{% endblock %}
 {% block content %}
-<div class="page-header">
-  <h1 class="page-title">Dashboard</h1>
-  <p class="page-subtitle">Your training at a glance</p>
+<div class="hero">
+  <div class="hero-content">
+    <div>
+      <div class="hero-eyebrow">~/dashboard<span class="caret" aria-hidden="true"></span></div>
+      <h1 class="hero-title">Good to see you, <em>{{ user.username }}</em>.</h1>
+      <p class="hero-subtitle">Consistency compounds. Here's where your training stands this week.</p>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="hero-stat-value">{{ week_streak }}<span>×</span></div>
+        <div class="hero-stat-label">week streak</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">{{ this_week_load }}</div>
+        <div class="hero-stat-label">load this week</div>
+      </div>
+      <div class="hero-stat">
+        <div class="hero-stat-value">{{ total_volume_t }}</div>
+        <div class="hero-stat-label">tonnes lifted</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="kpi-grid">
   <a href="/sessions" class="kpi-card">
-    <div class="kpi-label">Total Sessions</div>
+    <div class="kpi-label">Sessions</div>
     <div class="kpi-value">{{ session_count }}</div>
+    <div class="kpi-hint">all time</div>
   </a>
   <a href="/exercises" class="kpi-card">
     <div class="kpi-label">Exercises</div>
     <div class="kpi-value">{{ exercise_count }}</div>
+    <div class="kpi-hint">in your catalog</div>
   </a>
   <a href="/templates" class="kpi-card">
     <div class="kpi-label">Templates</div>
     <div class="kpi-value">{{ template_count }}</div>
+    <div class="kpi-hint">ready to run</div>
   </a>
 </div>
 
 <div class="card">
   <div class="section-header">
-    <span class="section-title">Weekly Load (Last 12 Weeks)</span>
+    <span class="section-title">Weekly Load <span class="section-title-suffix">· last 12 weeks</span></span>
   </div>
   {% if weekly_activity %}
   <div class="chart-box">
@@ -94,68 +116,94 @@
   if (activityData.length === 0) return;
 
   const style = getComputedStyle(document.documentElement);
-  const colorText     = style.getPropertyValue("--color-text").trim();
   const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
   const colorPrimary  = style.getPropertyValue("--color-primary").trim();
   const colorBlue     = style.getPropertyValue("--color-blue").trim();
   const colorDivider  = style.getPropertyValue("--color-divider").trim();
+  const colorSurface  = style.getPropertyValue("--color-surface").trim();
+  const colorText     = style.getPropertyValue("--color-text").trim();
+  const fontBody      = style.getPropertyValue("--font-body").trim();
 
   const ctx = document.getElementById("activityChart").getContext("2d");
   const isCompact = window.matchMedia("(max-width: 768px)").matches;
   const shortLabel = l => l.replace(/^\d{4}-W/, "W");
+
+  // Soft vertical gradient under the strength curve (tracks the canvas height
+  // so the fade reaches fully transparent at the bottom edge, whatever the
+  // responsive .chart-box height is)
+  const strengthFill = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
+  strengthFill.addColorStop(0, colorPrimary + "3d");
+  strengthFill.addColorStop(1, colorPrimary + "00");
+
+  const tooltip = {
+    backgroundColor: colorSurface,
+    borderColor: colorDivider,
+    borderWidth: 1,
+    titleColor: colorText,
+    bodyColor: colorMuted,
+    titleFont: { family: fontBody, weight: "600", size: 12 },
+    bodyFont: { family: fontBody, size: 12 },
+    padding: 10,
+    cornerRadius: 10,
+    boxPadding: 4,
+    displayColors: true,
+  };
+
   new Chart(ctx, {
     type: "line",
     data: {
-      labels: activityData.map(d => isCompact ? shortLabel(d.date) : d.date),
+      labels: activityData.map(d => isCompact ? shortLabel(d.date) : d.date.replace(/^\d{4}-W/, "W")),
       datasets: [{
-        label: "Strength Load (kg)",
+        label: "Strength",
         data: activityData.map(d => d.load),
         yAxisID: "y",
         borderColor: colorPrimary,
-        backgroundColor: colorPrimary + "33",
-        borderWidth: 2.5,
+        backgroundColor: strengthFill,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
         pointBackgroundColor: colorPrimary,
-        pointRadius: 4,
-        pointHoverRadius: 6,
+        pointBorderColor: colorSurface,
+        pointBorderWidth: 2,
         fill: true,
-        tension: 0.3,
+        tension: 0.4,
       }, {
-        label: "Cardio Load",
+        label: "Cardio",
         data: activityData.map(d => d.cardio_load),
         yAxisID: "y1",
         borderColor: colorBlue,
-        backgroundColor: colorBlue + "33",
+        backgroundColor: "transparent",
         borderWidth: 2,
-        borderDash: [5, 4],
+        pointRadius: 0,
+        pointHoverRadius: 4,
         pointBackgroundColor: colorBlue,
-        pointRadius: 3,
-        pointHoverRadius: 5,
+        pointBorderColor: colorSurface,
+        pointBorderWidth: 2,
         fill: false,
-        tension: 0.3,
+        tension: 0.4,
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
       animation: { duration: 700, easing: "easeOutQuart" },
       plugins: {
         legend: {
           display: true,
+          position: "top",
+          align: "end",
           labels: {
             color: colorMuted,
-            boxWidth: 12,
-            font: { size: isCompact ? 10 : 11 },
-            padding: isCompact ? 8 : 12,
+            usePointStyle: true,
+            pointStyle: "circle",
+            boxWidth: 6,
+            boxHeight: 6,
+            font: { family: fontBody, size: isCompact ? 10 : 12 },
+            padding: isCompact ? 8 : 16,
           }
         },
-        tooltip: {
-          backgroundColor: style.getPropertyValue("--color-surface-2").trim(),
-          titleColor: colorText,
-          bodyColor: colorMuted,
-          borderColor: style.getPropertyValue("--color-border").trim(),
-          borderWidth: 1,
-          padding: 10,
-        },
+        tooltip: tooltip,
       },
       scales: {
         x: {
@@ -167,18 +215,19 @@
             autoSkip: true,
             maxTicksLimit: isCompact ? 6 : 12,
           },
-          grid: { color: colorDivider },
+          grid: { display: false },
+          border: { display: false },
         },
         y: {
           title: { display: !isCompact, text: "Strength (kg)", color: colorMuted, font: { size: 11 } },
           ticks: {
             color: colorMuted,
             font: { size: isCompact ? 9 : 11 },
-            stepSize: 1,
-            maxTicksLimit: isCompact ? 5 : undefined,
-            callback: isCompact ? v => Intl.NumberFormat("en", { notation: "compact" }).format(v) : undefined,
+            maxTicksLimit: isCompact ? 5 : 6,
+            callback: v => Intl.NumberFormat("en", { notation: "compact" }).format(v),
           },
           grid: { color: colorDivider },
+          border: { display: false },
           beginAtZero: true,
         },
         y1: {
@@ -187,9 +236,10 @@
           ticks: {
             color: colorMuted,
             font: { size: isCompact ? 9 : 11 },
-            maxTicksLimit: isCompact ? 5 : undefined,
+            maxTicksLimit: isCompact ? 5 : 6,
           },
           grid: { drawOnChartArea: false },
+          border: { display: false },
           beginAtZero: true,
         },
       },
