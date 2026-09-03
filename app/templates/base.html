@@ -130,6 +130,14 @@
     </a>
 
     {% if user %}
+    <div class="nav-section-label" style="margin-top: var(--space-4);">Account</div>
+    <a href="/profile" class="nav-link {% if path.startswith('/profile') %}active{% endif %}">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
+      </svg>
+      Profile
+    </a>
     <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
       <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
@@ -140,14 +148,6 @@
       </svg>
       <span>Theme</span>
     </button>
-    <div class="nav-section-label" style="margin-top: var(--space-4);">Account</div>
-    <a href="/profile" class="nav-link {% if path.startswith('/profile') %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
-      Profile
-    </a>
     <div class="sidebar-user">
       <span class="sidebar-username">{{ user.username }}</span>
       <form method="post" action="/logout" style="display:inline">
