@@ -309,18 +309,20 @@ async def profile_update(
 
 # ── PAGES ────────────────────────────────────────────────────────────────────
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    sessions = db.query(models.WorkoutSession).order_by(models.WorkoutSession.date.desc()).limit(5).all()
+def _dashboard_context(user: models.User, db: Session, weeks: int) -> dict:
+    """Shared data assembly for the dashboard page and its htmx chart
+    fragments so both always render identical numbers."""
+    sessions = db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.date.desc()).limit(5).all()
     exercises = db.query(models.Exercise).all()
     templates_db = db.query(models.SessionTemplate).all()
-    
-    # Training load data for dashboard chart (last 12 weeks)
+
+    # Training load data for dashboard chart (last `weeks` weeks)
     from datetime import timedelta
     from collections import defaultdict
-    # Monday of the current week; chart spans exactly 12 Monday-aligned weeks.
+    # Monday of the current week; chart spans exactly `weeks` Monday-aligned weeks.
     current_monday = date.today() - timedelta(days=date.today().weekday())
-    week_start = current_monday - timedelta(weeks=11)
+    week_start = current_monday - timedelta(weeks=weeks - 1)
     recent_sessions_full = (
         db.query(models.WorkoutSession)
         .filter(models.WorkoutSession.date >= week_start)
@@ -359,7 +361,7 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
             weekly_cardio_load[week_key] += a.distance_km * _cardio_load_factor(a.activity_type)
 
     # Dense week axis so weeks without sessions show as zero instead of
-    # being skipped. ISO weeks (isocalendar) start on Monday. Exactly 12
+    # being skipped. ISO weeks (isocalendar) start on Monday. Exactly `weeks`
     # Monday-aligned buckets; empty series when there is no data so the
     # template's "No training data yet" empty state stays reachable.
     week_cursor = week_start
@@ -407,7 +409,7 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
     )
     total_volume_t = f"{total_volume / 1000.0:,.1f}"
 
-    return templates.TemplateResponse(request, "index.html", {
+    return {
         "recent_sessions": sessions,
         "exercise_count": len(exercises),
         "template_count": len(templates_db),
@@ -416,8 +418,27 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
         "week_streak": week_streak,
         "this_week_load": f"{this_week_load:,}",
         "total_volume_t": total_volume_t,
+        "chart_weeks": weeks,
         "user": user,
-    })
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return templates.TemplateResponse(request, "index.html",
+                                      _dashboard_context(user, db, weeks=12))
+
+
+@app.get("/fragments/weekly-load", response_class=HTMLResponse)
+async def fragment_weekly_load(
+    request: Request,
+    weeks: int = Query(default=12, ge=4, le=52),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """htmx fragment: the weekly-load chart card for the requested range."""
+    ctx = _dashboard_context(user, db, weeks=weeks)
+    return templates.TemplateResponse(request, "partials/weekly_load.html", ctx)
 
 
 @app.get("/exercises", response_class=HTMLResponse)

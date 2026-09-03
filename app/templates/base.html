@@ -15,9 +15,11 @@
   <meta name="theme-color" content="#0b0d12" />
   <link rel="mask-icon" href="/static/favicon.svg" color="#e94560" />
   {% block styles %}{% endblock %}
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
 </head>
 
-<body>
+<body hx-boost="true" hx-target="#main-content" hx-swap="innerHTML show:window:top" hx-indicator="#boost-indicator">
+  <div id="boost-indicator" class="boost-indicator" aria-hidden="true"></div>
   <script>
     // Delegated delete-confirm: forms with data-confirm="…" ask before
     // submitting. Kept out of inline onclick so dynamic values can't be
@@ -230,6 +232,31 @@
     })();
   </script>
   {% block scripts %}{% endblock %}
+
+  <script>
+    // ── htmx prototype wiring ──────────────────────────────────────
+    // Morph swaps with the View Transitions API where the browser
+    // supports it; graceful instant swap everywhere else.
+    htmx.config.globalViewTransitions = true;
+
+    // Re-run per-page scripts after any boosted swap: htmx only replaces
+    // #main-content, so scripts inside it (Chart.js init) must be
+    // re-executed manually. Cloning avoids the browser deduplicating
+    // identical inline scripts.
+    document.addEventListener('htmx:afterSettle', (e) => {
+      if (!e.detail || !e.detail.elt || e.detail.elt !== document.body) return;
+      document.querySelectorAll('main script[src]').forEach((old) => {
+        const s = document.createElement('script');
+        s.src = old.src;
+        old.replaceWith(s);
+      });
+      document.querySelectorAll('main script:not([src])').forEach((old) => {
+        const s = document.createElement('script');
+        s.textContent = old.textContent;
+        old.replaceWith(s);
+      });
+    });
+  </script>
 </body>
 
 </html>
