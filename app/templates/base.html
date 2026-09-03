@@ -157,6 +157,9 @@
       const r = document.documentElement;
       let d = matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light";
       r.setAttribute("data-theme", d);
+      // Keep mobile browser chrome in step with the active theme
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", d === "dark" ? "#0b0d12" : "#f5f6f8");
     })();
 
     // ── Mobile sidebar toggle ────────────────────────────────────────────

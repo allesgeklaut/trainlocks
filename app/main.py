@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from sqlalchemy import text as sa_text, func
+from sqlalchemy import text as sa_text, func, Boolean
 
 # 1. Load environment variables first so they can be used for DB setup or by other modules
 load_dotenv()
@@ -119,6 +119,12 @@ CARDIO_LOAD_DEFAULT_FACTOR = 1.0
 
 def _cardio_load_factor(activity_type: str) -> float:
     return CARDIO_LOAD_FACTOR.get((activity_type or "").lower(), CARDIO_LOAD_DEFAULT_FACTOR)
+
+
+def _iso_week_key(d: date) -> str:
+    """Canonical chart bucket key for a date, e.g. '2026-W36' (ISO, Monday-aligned)."""
+    iso = d.isocalendar()
+    return f"{iso[0]}-W{iso[1]:02d}"
 
 
 def _parse_duration_min(value) -> float | None:
@@ -321,20 +327,23 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
         .order_by(models.WorkoutSession.date)
         .all()
     )
-    # Build weekly training load: sum(weight * reps) per ISO week
+    # Build weekly training load: sum(weight * reps) per ISO week.
+    # Mirrors the lifetime-tonnage query below (bodyweight + added kg for
+    # bodyweight lifts, unmeasured weight counts as 0) so hero stats and
+    # chart tell the same story.
     weekly_load = defaultdict(float)
     bodyweight_kg = user.bodyweight or BODYWEIGHT_DEFAULT_KG
     for sess in recent_sessions_full:
-        iso_cal = sess.date.isocalendar()
-        week_key = f"{iso_cal[0]}-W{iso_cal[1]:02d}"
+        week_key = _iso_week_key(sess.date)
         for set_entry in sess.sets:
             is_bodyweight = bool(set_entry.exercise and set_entry.exercise.is_bodyweight)
             if is_bodyweight:
                 # Bodyweight lifts count as bodyweight + any added kg (vest, belt).
                 weight = bodyweight_kg + (set_entry.weight or 0.0)
             else:
-                weight = set_entry.weight if set_entry.weight is not None else 1.0
-            weekly_load[week_key] += weight * set_entry.reps
+                # Unmeasured barbell weight can't be counted toward tonnage.
+                weight = set_entry.weight or 0.0
+            weekly_load[week_key] += weight * (set_entry.reps or 0)
 
     # Cardio load per ISO week: distance scaled by per-activity effort factor
     cardio_activities = (
@@ -345,8 +354,7 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
     )
     weekly_cardio_load = defaultdict(float)
     for a in cardio_activities:
-        iso = a.session.date.isocalendar()
-        week_key = f"{iso[0]}-W{iso[1]:02d}"
+        week_key = _iso_week_key(a.session.date)
         if a.distance_km:
             weekly_cardio_load[week_key] += a.distance_km * _cardio_load_factor(a.activity_type)
 
@@ -357,8 +365,7 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
     week_cursor = week_start
     all_weeks = []
     while week_cursor <= current_monday:
-        iso = week_cursor.isocalendar()
-        all_weeks.append(f"{iso[0]}-W{iso[1]:02d}")
+        all_weeks.append(_iso_week_key(week_cursor))
         week_cursor += timedelta(weeks=1)
     weekly_data = [
         {
@@ -370,18 +377,32 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
     ] if (weekly_load or weekly_cardio_load) else []
 
     # Hero stats: this week's load, consecutive training weeks, lifetime tonnage.
-    # Streak counts weeks (ending this week) that had any logged activity.
-    this_week_key = f"{current_monday.isocalendar()[0]}-W{current_monday.isocalendar()[1]:02d}"
+    # Streak counts consecutive weeks (ending this week) with any logged activity,
+    # computed over ALL history so it isn't capped by the 12-week chart window.
+    this_week_key = _iso_week_key(current_monday)
     this_week_load = int(weekly_load.get(this_week_key, 0.0))
+
+    week_keys = set(weekly_load) | set(weekly_cardio_load)
     week_streak = 0
-    for k in reversed(all_weeks):
-        if weekly_load.get(k, 0.0) > 0 or weekly_cardio_load.get(k, 0.0) > 0:
-            week_streak += 1
-        else:
-            break
+    streak_cursor = current_monday
+    while _iso_week_key(streak_cursor) in week_keys:
+        week_streak += 1
+        streak_cursor -= timedelta(weeks=1)
+
+    # Same semantics as the weekly-load loop above: bodyweight exercises
+    # contribute the viewer's bodyweight + added kg, unmeasured weight
+    # counts as 0. Sessions carry no user_id (single-athlete data model),
+    # so the viewer's own bodyweight is used rather than joining users.
+    bodyweight_kg = user.bodyweight or BODYWEIGHT_DEFAULT_KG
     total_volume = (
-        db.query(func.coalesce(func.sum(models.SetEntry.weight * models.SetEntry.reps), 0.0))
+        db.query(func.coalesce(func.sum(
+            (
+                func.coalesce(models.SetEntry.weight, 0.0)
+                + func.coalesce(models.Exercise.is_bodyweight, False).cast(Boolean) * bodyweight_kg
+            ) * func.coalesce(models.SetEntry.reps, 0)
+        ), 0.0))
         .join(models.WorkoutSession, models.SetEntry.session_id == models.WorkoutSession.id)
+        .join(models.Exercise, models.SetEntry.exercise_id == models.Exercise.id)
         .scalar() or 0.0
     )
     total_volume_t = f"{total_volume / 1000.0:,.1f}"
