@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
-from sqlalchemy import text as sa_text
+from sqlalchemy import text as sa_text, func
 
 # 1. Load environment variables first so they can be used for DB setup or by other modules
 load_dotenv()
@@ -368,13 +368,33 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
         }
         for k in all_weeks
     ] if (weekly_load or weekly_cardio_load) else []
-    
+
+    # Hero stats: this week's load, consecutive training weeks, lifetime tonnage.
+    # Streak counts weeks (ending this week) that had any logged activity.
+    this_week_key = f"{current_monday.isocalendar()[0]}-W{current_monday.isocalendar()[1]:02d}"
+    this_week_load = int(weekly_load.get(this_week_key, 0.0))
+    week_streak = 0
+    for k in reversed(all_weeks):
+        if weekly_load.get(k, 0.0) > 0 or weekly_cardio_load.get(k, 0.0) > 0:
+            week_streak += 1
+        else:
+            break
+    total_volume = (
+        db.query(func.coalesce(func.sum(models.SetEntry.weight * models.SetEntry.reps), 0.0))
+        .join(models.WorkoutSession, models.SetEntry.session_id == models.WorkoutSession.id)
+        .scalar() or 0.0
+    )
+    total_volume_t = f"{total_volume / 1000.0:,.1f}"
+
     return templates.TemplateResponse(request, "index.html", {
         "recent_sessions": sessions,
         "exercise_count": len(exercises),
         "template_count": len(templates_db),
         "session_count": db.query(models.WorkoutSession).count(),
         "weekly_activity": weekly_data,
+        "week_streak": week_streak,
+        "this_week_load": f"{this_week_load:,}",
+        "total_volume_t": total_volume_t,
         "user": user,
     })
 
