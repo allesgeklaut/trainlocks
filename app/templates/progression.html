@@ -6,10 +6,9 @@
   <p class="page-subtitle">Track how your lifts develop over time</p>
 </div>
 
-<div class="card" style="max-width:400px;margin-bottom:var(--space-6)">
-  <div class="card-title">Select Exercise</div>
-  <form method="get" action="/progression">
-    <select name="exercise_id" onchange="this.form.submit()" style="width:100%">
+<div class="progression-controls card" style="margin-bottom:var(--space-6)">
+  <div class="select-wrap">
+    <select name="exercise_id" onchange="window.location.href='/progression?exercise_id=' + this.value">
       <option value="">— choose exercise —</option>
       {% for ex in exercises %}
       <option value="{{ ex.id }}" {% if selected_exercise and ex.id == selected_exercise.id %}selected{% endif %}>
@@ -17,29 +16,59 @@
       </option>
       {% endfor %}
     </select>
-  </form>
+  </div>
 </div>
 
 {% if selected_exercise %}
 <div id="chart-section">
+  <!-- Summary stats, filled by JS -->
+  <div class="stat-grid" id="stat-grid" style="display:none">
+    <div class="stat-card">
+      <div class="stat-label">Best Set Top</div>
+      <div class="stat-value" id="stat-top">—</div>
+      <div class="stat-hint" id="stat-top-hint">kg</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Est. 1RM</div>
+      <div class="stat-value" id="stat-1rm">—</div>
+      <div class="stat-hint">Epley · kg</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Best Volume</div>
+      <div class="stat-value" id="stat-vol">—</div>
+      <div class="stat-hint" id="stat-vol-hint">kg × reps</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Sessions</div>
+      <div class="stat-value" id="stat-sessions">—</div>
+      <div class="stat-hint">logged</div>
+    </div>
+  </div>
+
   <div class="card-grid">
     <div class="card">
-      <div class="card-title">Top Weight per Session (kg)</div>
+      <div class="section-header">
+        <span class="section-title" id="weight-chart-title">Top Weight per Session</span>
+      </div>
       <div class="chart-container"><canvas id="weightChart"></canvas></div>
     </div>
     <div class="card">
-      <div class="card-title">Total Volume per Session (kg × reps)</div>
+      <div class="section-header">
+        <span class="section-title">Total Volume per Session</span>
+      </div>
       <div class="chart-container"><canvas id="volumeChart"></canvas></div>
     </div>
   </div>
   <div class="card">
-    <div class="card-title">Progression History</div>
+    <div class="section-header">
+      <span class="section-title">Progression History</span>
+    </div>
     <div id="table-placeholder" class="empty-state" style="padding:var(--space-8)">
       <p>Loading data…</p>
     </div>
     <div id="table-wrap" class="table-wrap" style="display:none">
       <table>
-        <thead><tr><th>Date</th><th>Top Weight (kg)</th><th>Volume (kg×reps)</th><th>Total Reps</th></tr></thead>
+        <thead><tr><th>Date</th><th id="th-weight">Top Weight</th><th>Volume</th><th>Total Reps</th></tr></thead>
         <tbody id="table-body"></tbody>
       </table>
     </div>
@@ -56,6 +85,65 @@
 {% endif %}
 {% endblock %}
 
+{% block styles %}
+<style>
+  .progression-controls { padding: var(--space-4) var(--space-5); }
+  .progression-controls select { max-width: 340px; }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-4);
+    margin-bottom: var(--space-6);
+  }
+  .stat-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-4) var(--space-5);
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-label {
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--color-text-muted);
+    font-weight: 600;
+    margin-bottom: var(--space-2);
+  }
+  .stat-value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums lining-nums;
+    font-size: var(--text-lg);
+    font-weight: 700;
+    color: var(--color-text);
+    line-height: 1.1;
+  }
+  .stat-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-faint);
+    margin-top: var(--space-1);
+  }
+  .pr-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--color-primary);
+    background: var(--color-primary-highlight);
+    border-radius: 999px;
+    padding: 1px 7px;
+    vertical-align: middle;
+    margin-left: 6px;
+  }
+
+  @media (max-width: 768px) {
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+{% endblock %}
+
 {% block scripts %}
 {% if selected_exercise %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -65,7 +153,40 @@
   const res = await fetch(`/api/progression/${exerciseId}`);
   const { data } = await res.json();
 
-  // fill table
+  const style = getComputedStyle(document.documentElement);
+  const colorText     = style.getPropertyValue("--color-text").trim();
+  const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
+  const colorPrimary  = style.getPropertyValue("--color-primary").trim();
+  const colorBlue     = style.getPropertyValue("--color-blue").trim();
+  const colorDivider  = style.getPropertyValue("--color-divider").trim();
+  const colorSurface  = style.getPropertyValue("--color-surface").trim();
+  const colorBorder   = style.getPropertyValue("--color-border").trim();
+  const fontBody      = style.getPropertyValue("--font-body").trim();
+
+  // Sessions that are chartable (weighted, or bodyweight reps-as-load).
+  const chartData = data.filter(r => r.has_weight);
+  const isBodyweight = chartData.length > 0 && chartData[0].is_bodyweight;
+  const isCompact = window.matchMedia("(max-width: 768px)").matches;
+  const labels = chartData.map(r => isCompact ? r.date.slice(5) : r.date);
+
+  // ── Summary stats ────────────────────────────────────────────────────
+  if (chartData.length > 0) {
+    const fmt = v => Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(v);
+    const best = chartData.reduce((a, b) => b.est_1rm >= a.est_1rm ? b : a);
+    const bestVol = chartData.reduce((a, b) => b.volume >= a.volume ? b : a);
+
+    document.getElementById("stat-grid").style.display = "";
+    document.getElementById("stat-top").textContent = isBodyweight
+      ? fmt(best.effective_top_weight)
+      : fmt(Math.max(...chartData.map(r => r.top_weight)));
+    document.getElementById("stat-top-hint").textContent = isBodyweight ? "kg (incl. bodyweight)" : "kg";
+    document.getElementById("stat-1rm").textContent = fmt(best.est_1rm);
+    document.getElementById("stat-vol").textContent = fmt(bestVol.volume);
+    document.getElementById("stat-vol-hint").textContent = isBodyweight ? "total reps" : "kg × reps";
+    document.getElementById("stat-sessions").textContent = data.length;
+  }
+
+  // ── History table ────────────────────────────────────────────────────
   const tbody = document.getElementById("table-body");
   if (data.length === 0) {
     document.getElementById("table-placeholder").style.display = "flex";
@@ -73,28 +194,32 @@
   } else {
     document.getElementById("table-placeholder").style.display = "none";
     document.getElementById("table-wrap").style.display = "";
+    if (isBodyweight) document.getElementById("th-weight").textContent = "Load (incl. BW)";
+    const max1rm = chartData.length > 0 ? Math.max(...chartData.map(x => x.est_1rm)) : null;
     data.forEach(r => {
       const tr = document.createElement("tr");
-      const weight = r.has_weight ? r.top_weight.toFixed(1) : "—";
-      const volume = r.has_weight ? r.volume.toFixed(1) : "—";
-      tr.innerHTML = `<td>${r.date}</td><td>${weight}</td><td>${volume}</td><td>${r.total_reps}</td>`;
+      const weight = r.has_weight
+        ? (isBodyweight ? r.effective_top_weight.toFixed(1) : r.top_weight.toFixed(1))
+        : "—";
+      const isPr = max1rm !== null && r.has_weight && r.est_1rm === max1rm;
+      tr.innerHTML = `<td>${r.date}</td><td>${weight}${isPr ? '<span class="pr-badge">PR</span>' : ''}</td><td>${r.has_weight ? r.volume.toFixed(1) : "—"}</td><td>${r.total_reps}</td>`;
       tbody.appendChild(tr);
     });
   }
 
-  // resolve CSS tokens for chart theming
-  const style = getComputedStyle(document.documentElement);
-  const colorText     = style.getPropertyValue("--color-text").trim();
-  const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
-  const colorPrimary  = style.getPropertyValue("--color-primary").trim();
-  const colorOrange   = style.getPropertyValue("--color-orange").trim();
-  const colorDivider  = style.getPropertyValue("--color-divider").trim();
-
-  // Charts only plot sessions that have a weight; the table above still
-  // lists weight-less sessions (marked with —) so they aren't silently gone.
-  const chartData = data.filter(r => r.has_weight);
-  const isCompact = window.matchMedia("(max-width: 768px)").matches;
-  const labels = chartData.map(r => isCompact ? r.date.slice(5) : r.date);
+  // ── Chart theming ────────────────────────────────────────────────────
+  const tooltip = {
+    backgroundColor: colorSurface,
+    borderColor: colorBorder,
+    borderWidth: 1,
+    titleColor: colorText,
+    bodyColor: colorMuted,
+    titleFont: { family: fontBody, weight: "600", size: 12 },
+    bodyFont: { family: fontBody, size: 12 },
+    padding: 10,
+    cornerRadius: 10,
+    boxPadding: 4,
+  };
 
   const baseOptions = {
     responsive: true,
@@ -125,72 +250,88 @@
           autoSkip: true,
           maxTicksLimit: isCompact ? 5 : undefined,
         },
-        grid: { color: colorDivider },
+        grid: { display: false },
+        border: { display: false },
       },
       y: {
         ticks: {
           color: colorMuted,
           font: { size: isCompact ? 9 : 11 },
           maxTicksLimit: isCompact ? 5 : undefined,
-          callback: isCompact ? v => Intl.NumberFormat("en", { notation: "compact" }).format(v) : undefined,
+          callback: v => Intl.NumberFormat("en", { notation: "compact" }).format(v),
         },
         grid: { color: colorDivider },
-        beginAtZero: false,
+        border: { display: false },
       },
     },
   };
 
-  function makeGradient(ctx, color) {
+  function makeGradient(ctx, color, alpha) {
     const g = ctx.createLinearGradient(0, 0, 0, 280);
-    g.addColorStop(0, color + "55");
+    g.addColorStop(0, color + alpha);
     g.addColorStop(1, color + "00");
     return g;
   }
 
-  // Weight chart
+  // ── Top weight chart ─────────────────────────────────────────────────
+  // Weighted: top added weight. Bodyweight: effective load incl. bodyweight
+  // (flat added-weight zero lines are meaningless for BW lifts).
+  const weightValues = chartData.map(r => isBodyweight ? r.effective_top_weight : r.top_weight);
+  document.getElementById("weight-chart-title").textContent = isBodyweight
+    ? "Top Load per Session (incl. bodyweight)"
+    : "Top Weight per Session (kg)";
+
   const wCtx = document.getElementById("weightChart").getContext("2d");
   new Chart(wCtx, {
     type: "line",
     data: {
       labels,
       datasets: [{
-        data: chartData.map(r => r.top_weight),
+        data: weightValues,
         borderColor: colorPrimary,
-        backgroundColor: makeGradient(wCtx, colorPrimary),
-        borderWidth: 2.5,
+        backgroundColor: makeGradient(wCtx, colorPrimary, "33"),
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
         pointBackgroundColor: colorPrimary,
-        pointRadius: chartData.length > 30 ? 2 : 4,
-        pointHoverRadius: 6,
+        pointBorderColor: colorSurface,
+        pointBorderWidth: 2,
         fill: true,
-        tension: 0.35,
-      }]
-    },
-    options: baseOptions,
-  });
-
-  // Volume chart
-  const vCtx = document.getElementById("volumeChart").getContext("2d");
-  new Chart(vCtx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        data: chartData.map(r => r.volume),
-        backgroundColor: colorOrange + "cc",
-        borderColor: colorOrange,
-        borderWidth: 1.5,
-        borderRadius: 4,
-        hoverBackgroundColor: colorOrange,
+        tension: 0.4,
       }]
     },
     options: {
       ...baseOptions,
       scales: {
         ...baseOptions.scales,
-        y: {
-          ...baseOptions.scales.y,
-          beginAtZero: true,
-        },
+        y: { ...baseOptions.scales.y, beginAtZero: !isBodyweight },
+      },
+    },
+  });
+
+  // ── Volume chart ─────────────────────────────────────────────────────
+  // kg × reps for weighted exercises; plain rep count for bodyweight.
+  const vCtx = document.getElementById("volumeChart").getContext("2d");
+  new Chart(vCtx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: isBodyweight ? "Reps" : "Volume",
+        data: chartData.map(r => r.volume),
+        backgroundColor: colorBlue + "cc",
+        borderColor: colorBlue,
+        borderWidth: 0,
+        borderRadius: 6,
+        maxBarThickness: 42,
+        hoverBackgroundColor: colorBlue,
+      }]
+    },
+    options: {
+      ...baseOptions,
+      scales: {
+        ...baseOptions.scales,
+        y: { ...baseOptions.scales.y, beginAtZero: true },
       },
     },
   });
