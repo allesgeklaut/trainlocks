@@ -1,5 +1,5 @@
 /* Art direction: Strength training dashboard → "performance lab".
-   Palette: deep blue-black surfaces, electric lime primary, cyan cardio accent.
+   Palette: deep blue-black surfaces, crimson primary, cyan cardio accent.
    Typography: Satoshi for UI, JetBrains Mono reserved for numerals & data.
    Shape: soft 14px radii, layered shadows, one hero surface per page.
    Hacker heritage: ~/ eyebrow, blinking caret, fine grid texture — nothing more. */
@@ -137,8 +137,8 @@ body {
   font-size: var(--text-base);
   color: var(--color-text);
   background:
-    radial-gradient(1200px 500px at 85% -10%, #e9456008, transparent 60%),
-    radial-gradient(900px 420px at -15% 30%, #22d3ee07, transparent 55%),
+    radial-gradient(1200px 500px at 85% -10%, oklch(from var(--color-primary) l c h / 0.03), transparent 60%),
+    radial-gradient(900px 420px at -15% 30%, oklch(from var(--color-blue) l c h / 0.03), transparent 55%),
     var(--color-bg);
   background-attachment: fixed;
   display: grid;
@@ -221,7 +221,7 @@ textarea {
   top: 0;
   height: 100dvh;
   overflow-y: auto;
-  background: linear-gradient(180deg, #11141b, #0d1016);
+  background: linear-gradient(180deg, var(--color-surface), var(--color-surface-offset));
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -272,17 +272,19 @@ textarea {
 }
 
 .nav-link:hover {
-  background: #ffffff08;
+  background: oklch(from var(--color-text) l c h / 0.04);
   color: var(--color-text);
 }
 
 .nav-link.active {
-  background: linear-gradient(90deg, #e945601f, #e9456008 70%, transparent);
+  background: linear-gradient(90deg,
+    oklch(from var(--color-primary) l c h / 0.12),
+    oklch(from var(--color-primary) l c h / 0.05) 70%, transparent);
   color: var(--color-primary);
-  box-shadow: inset 0 0 0 1px #e9456026;
+  box-shadow: inset 0 0 0 1px oklch(from var(--color-primary) l c h / 0.15);
 }
 
-/* lime status dot on the active link */
+/* status dot on the active link */
 .nav-link.active::before {
   content: '';
   width: 5px;
@@ -336,23 +338,6 @@ textarea {
   border-top: 1px solid var(--color-divider);
 }
 
-.theme-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-md);
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-  width: 100%;
-  font-weight: 500;
-}
-
-.theme-toggle:hover {
-  background: #ffffff08;
-  color: var(--color-text);
-}
-
 /* ── Main content ──────────────────────────────────────────────────────── */
 .main {
   min-width: 0;
@@ -386,8 +371,8 @@ textarea {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   background:
-    radial-gradient(600px 220px at 88% -30%, #e9456014, transparent 65%),
-    radial-gradient(500px 260px at -10% 120%, #22d3ee0e, transparent 60%),
+    radial-gradient(600px 220px at 88% -30%, oklch(from var(--color-primary) l c h / 0.08), transparent 65%),
+    radial-gradient(500px 260px at -10% 120%, oklch(from var(--color-blue) l c h / 0.06), transparent 60%),
     linear-gradient(180deg, var(--color-surface-2), var(--color-surface));
   box-shadow: var(--shadow-md);
   margin-bottom: var(--space-6);
@@ -400,8 +385,8 @@ textarea {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(#ffffff06 1px, transparent 1px),
-    linear-gradient(90deg, #ffffff06 1px, transparent 1px);
+    linear-gradient(oklch(from var(--color-text) l c h / 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(from var(--color-text) l c h / 0.03) 1px, transparent 1px);
   background-size: 28px 28px;
   mask-image: radial-gradient(75% 90% at 50% 0%, #000 30%, transparent 100%);
   -webkit-mask-image: radial-gradient(75% 90% at 50% 0%, #000 30%, transparent 100%);
@@ -490,6 +475,10 @@ textarea {
   line-height: 1.1;
 }
 
+.hero-stat-value span {
+  color: var(--color-primary);
+}
+
 .hero-stat-label {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
@@ -524,7 +513,7 @@ textarea {
 
 a.kpi-card:hover {
   transform: translateY(-2px);
-  border-color: #e945604d;
+  border-color: oklch(from var(--color-primary) l c h / 0.3);
   box-shadow: var(--shadow-glow);
 }
 
@@ -566,10 +555,6 @@ a.kpi-card:hover::before {
   color: var(--color-text);
   font-family: var(--font-mono);
   line-height: 1;
-}
-
-.kpi-value span {
-  color: var(--color-primary);
 }
 
 .kpi-hint {
@@ -689,12 +674,12 @@ textarea:focus {
   background: var(--color-primary);
   color: var(--color-on-primary);
   border: 1px solid transparent;
-  box-shadow: 0 4px 14px -4px #e9456066;
+  box-shadow: 0 4px 14px -4px oklch(from var(--color-primary) l c h / 0.4);
 }
 
 .btn-primary:hover {
   background: var(--color-primary-hover);
-  box-shadow: 0 6px 20px -4px #e9456080;
+  box-shadow: 0 6px 20px -4px oklch(from var(--color-primary) l c h / 0.5);
   transform: translateY(-1px);
 }
 
@@ -759,7 +744,7 @@ table tbody tr {
 }
 
 table tbody tr:hover {
-  background: #ffffff06;
+  background: oklch(from var(--color-text) l c h / 0.03);
 }
 
 /* ── Badges ────────────────────────────────────────────────────────────── */
@@ -931,6 +916,11 @@ table tbody tr:hover {
   letter-spacing: -0.01em;
 }
 
+.section-title-suffix {
+  color: var(--color-text-faint);
+  font-weight: 500;
+}
+
 /* ── Collapsible notes cell ─────────────────────────────────────────────── */
 .notes-cell {
   max-width: 320px;
@@ -1014,7 +1004,7 @@ table tbody tr:hover {
 .btn-icon:hover {
   background: var(--color-surface-offset);
   color: var(--color-primary);
-  border-color: #e945604d;
+  border-color: oklch(from var(--color-primary) l c h / 0.3);
   box-shadow: var(--shadow-glow);
 }
 

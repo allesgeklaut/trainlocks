@@ -10,7 +10,7 @@
     </div>
     <div class="hero-stats">
       <div class="hero-stat">
-        <div class="hero-stat-value">{{ week_streak }}<span style="color:var(--color-primary)">×</span></div>
+        <div class="hero-stat-value">{{ week_streak }}<span>×</span></div>
         <div class="hero-stat-label">week streak</div>
       </div>
       <div class="hero-stat">
@@ -45,7 +45,7 @@
 
 <div class="card">
   <div class="section-header">
-    <span class="section-title">Weekly Load <span style="color:var(--color-text-faint);font-weight:500">· last 12 weeks</span></span>
+    <span class="section-title">Weekly Load <span class="section-title-suffix">· last 12 weeks</span></span>
   </div>
   {% if weekly_activity %}
   <div class="chart-box">
@@ -128,8 +128,10 @@
   const isCompact = window.matchMedia("(max-width: 768px)").matches;
   const shortLabel = l => l.replace(/^\d{4}-W/, "W");
 
-  // Soft vertical gradient under the strength curve
-  const strengthFill = ctx.createLinearGradient(0, 0, 0, 320);
+  // Soft vertical gradient under the strength curve (tracks the canvas height
+  // so the fade reaches fully transparent at the bottom edge, whatever the
+  // responsive .chart-box height is)
+  const strengthFill = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
   strengthFill.addColorStop(0, colorPrimary + "3d");
   strengthFill.addColorStop(1, colorPrimary + "00");
 
