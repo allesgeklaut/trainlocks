@@ -16,10 +16,8 @@
   </div>
 
   {% if weekly_activity %}
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <div class="chart-box chart-swap-enter">
-    <canvas id="activityChart"></canvas>
-  </div>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <div id="activityChart" class="chart-box chart-swap-enter"></div>
   {% else %}
   <p class="text-muted" style="text-align:center;padding:var(--space-6)">No training data yet. Log your first session to see activity!</p>
   {% endif %}
@@ -37,171 +35,124 @@
   const colorBlue     = style.getPropertyValue("--color-blue").trim();
   const colorDivider  = style.getPropertyValue("--color-divider").trim();
   const colorSurface  = style.getPropertyValue("--color-surface").trim();
+  const colorBorder   = style.getPropertyValue("--color-border").trim();
   const colorText     = style.getPropertyValue("--color-text").trim();
   const fontBody      = style.getPropertyValue("--font-body").trim();
 
-  const ctx = document.getElementById("activityChart").getContext("2d");
+  const el = document.getElementById("activityChart");
   const isCompact = window.matchMedia("(max-width: 768px)").matches;
-  const shortLabel = l => l.replace(/^\d{4}-W/, "W");
 
-  // ── neon glow plugin: outer shadow on the strength line ──────────
-  const glowPlugin = {
-    id: "lineGlow",
-    beforeDatasetsDraw(chart) {
-      chart.ctx.save();
-      chart.ctx.shadowColor = colorPrimary + "66";
-      chart.ctx.shadowBlur = 12;
+  const chart = echarts.init(el, null, { renderer: "canvas" });
+
+  const weeks = activityData.map(d => d.date.replace(/^\d{4}-W/, "W"));
+  const strength = activityData.map(d => d.load);
+  const cardio = activityData.map(d => d.cardio_load);
+
+  function alpha(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+
+  const baseText = { color: colorMuted, fontFamily: fontBody, fontSize: isCompact ? 10 : 12 };
+
+  chart.setOption({
+    animationDuration: 900,
+    animationEasing: "cubicOut",
+    textStyle: { fontFamily: fontBody },
+    color: [colorPrimary, colorBlue],
+    legend: {
+      top: 2,
+      right: 0,
+      icon: "circle",
+      itemWidth: 8,
+      itemHeight: 8,
+      textStyle: { ...baseText, color: colorMuted },
+      itemGap: 18,
     },
-    afterDatasetsDraw(chart) {
-      chart.ctx.shadowBlur = 0;
-      chart.ctx.shadowColor = "transparent";
-    },
-  };
-
-  // ── crosshair: vertical hairline that tracks the hovered point ───
-  const crosshairPlugin = {
-    id: "crosshair",
-    afterDatasetsDraw(chart) {
-      const active = chart.getActiveElements();
-      if (!active.length) return;
-      const x = active[0].element.x;
-      const { top, bottom } = chart.chartArea;
-      const c = chart.ctx;
-      c.save();
-      const grad = c.createLinearGradient(0, top, 0, bottom);
-      grad.addColorStop(0, colorPrimary + "00");
-      grad.addColorStop(0.5, colorPrimary + "55");
-      grad.addColorStop(1, colorPrimary + "00");
-      c.strokeStyle = grad;
-      c.lineWidth = 1;
-      c.beginPath();
-      c.moveTo(x, top);
-      c.lineTo(x, bottom);
-      c.stroke();
-      c.restore();
-    },
-  };
-
-  // Soft vertical gradient under the strength curve (tracks the canvas height
-  // so the fade reaches fully transparent at the bottom edge, whatever the
-  // responsive .chart-box height is)
-  const strengthFill = ctx.createLinearGradient(0, 0, 0, ctx.canvas.height);
-  strengthFill.addColorStop(0, colorPrimary + "3d");
-  strengthFill.addColorStop(1, colorPrimary + "00");
-
-  const tooltip = {
-    backgroundColor: colorSurface,
-    borderColor: colorDivider,
-    borderWidth: 1,
-    titleColor: colorText,
-    bodyColor: colorMuted,
-    titleFont: { family: fontBody, weight: "600", size: 12 },
-    bodyFont: { family: fontBody, size: 12 },
-    padding: 10,
-    cornerRadius: 10,
-    boxPadding: 4,
-    displayColors: true,
-  };
-
-  new Chart(ctx, {
-    type: "line",
-    plugins: [glowPlugin, crosshairPlugin],
-    data: {
-      labels: activityData.map(d => isCompact ? shortLabel(d.date) : d.date.replace(/^\d{4}-W/, "W")),
-      datasets: [{
-        label: "Strength",
-        data: activityData.map(d => d.load),
-        yAxisID: "y",
-        borderColor: colorPrimary,
-        backgroundColor: strengthFill,
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        pointBackgroundColor: colorPrimary,
-        pointBorderColor: colorSurface,
-        pointBorderWidth: 2,
-        fill: true,
-        tension: 0.4,
-      }, {
-        label: "Cardio",
-        data: activityData.map(d => d.cardio_load),
-        yAxisID: "y1",
-        borderColor: colorBlue,
-        backgroundColor: "transparent",
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        pointBackgroundColor: colorBlue,
-        pointBorderColor: colorSurface,
-        pointBorderWidth: 2,
-        fill: false,
-        tension: 0.4,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
-      animation: { duration: 700, easing: "easeOutQuart" },
-      plugins: {
-        lineGlow: true,
-        crosshair: true,
-        legend: {
-          display: true,
-          position: "top",
-          align: "end",
-          labels: {
-            color: colorMuted,
-            usePointStyle: true,
-            pointStyle: "circle",
-            boxWidth: 6,
-            boxHeight: 6,
-            font: { family: fontBody, size: isCompact ? 10 : 12 },
-            padding: isCompact ? 8 : 16,
-          }
-        },
-        tooltip: tooltip,
-      },
-      scales: {
-        x: {
-          ticks: {
-            color: colorMuted,
-            font: { size: isCompact ? 9 : 11 },
-            maxRotation: isCompact ? 45 : 0,
-            minRotation: isCompact ? 45 : 0,
-            autoSkip: true,
-            maxTicksLimit: isCompact ? 6 : Math.min(activityData.length, 12),
-          },
-          grid: { display: false },
-          border: { display: false },
-        },
-        y: {
-          title: { display: !isCompact, text: "Strength (kg)", color: colorMuted, font: { size: 11 } },
-          ticks: {
-            color: colorMuted,
-            font: { size: isCompact ? 9 : 11 },
-            maxTicksLimit: isCompact ? 5 : 6,
-            callback: v => Intl.NumberFormat("en", { notation: "compact" }).format(v),
-          },
-          grid: { color: colorDivider },
-          border: { display: false },
-          beginAtZero: true,
-        },
-        y1: {
-          position: "right",
-          title: { display: !isCompact, text: "Cardio Load", color: colorMuted, font: { size: 11 } },
-          ticks: {
-            color: colorMuted,
-            font: { size: isCompact ? 9 : 11 },
-            maxTicksLimit: isCompact ? 5 : 6,
-          },
-          grid: { drawOnChartArea: false },
-          border: { display: false },
-          beginAtZero: true,
-        },
+    grid: { top: 42, left: isCompact ? 8 : 12, right: isCompact ? 8 : 14, bottom: 4, containLabel: true },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "line", lineStyle: { color: alpha(colorPrimary, 0.45), width: 1 } },
+      backgroundColor: colorSurface,
+      borderColor: colorBorder,
+      borderWidth: 1,
+      padding: [10, 14],
+      textStyle: { color: colorText, fontFamily: fontBody, fontSize: 12 },
+      extraCssText: "border-radius:12px;box-shadow:0 8px 24px -8px rgba(0,0,0,.5);backdrop-filter:blur(6px);",
+      formatter: (params) => {
+        const week = activityData[params[0].dataIndex]?.date || params[0].axisValue;
+        const dot = c => `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c};margin-right:6px"></span>`;
+        let html = `<div style="font-weight:600;color:${colorText};margin-bottom:6px">${week}</div>`;
+        for (const p of params) {
+          const v = p.seriesName === "Strength" ? `${Number(p.value).toLocaleString("en")} kg` : `${Number(p.value).toLocaleString("en")} load`;
+          html += `<div style="color:${colorMuted};margin:2px 0">${dot(p.color)}${p.seriesName}&nbsp;<b style="color:${colorText};float:right;margin-left:12px">${v}</b></div>`;
+        }
+        return html;
       },
     },
+    xAxis: {
+      type: "category",
+      data: weeks,
+      boundaryGap: false,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { ...baseText, interval: isCompact ? "auto" : Math.max(Math.floor(weeks.length / (isCompact ? 4 : 12)), 0) },
+      axisPointer: { show: true, lineStyle: { color: alpha(colorPrimary, 0.35) } },
+    },
+    yAxis: [
+      {
+        type: "value",
+        name: isCompact ? "" : "Strength (kg)",
+        nameTextStyle: { color: colorMuted, fontSize: 11, fontFamily: fontBody, padding: [0, 0, 6, 0] },
+        axisLabel: { ...baseText, formatter: v => Intl.NumberFormat("en", { notation: "compact" }).format(v) },
+        splitLine: { lineStyle: { color: colorDivider, type: [4, 6] } },
+      },
+      {
+        type: "value",
+        name: isCompact ? "" : "Cardio load",
+        nameTextStyle: { color: colorMuted, fontSize: 11, fontFamily: fontBody, padding: [0, 0, 6, 0] },
+        axisLabel: { ...baseText, formatter: v => Intl.NumberFormat("en", { notation: "compact" }).format(v) },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: "Strength",
+        type: "line",
+        smooth: 0.4,
+        data: strength,
+        yAxisIndex: 0,
+        showSymbol: false,
+        symbol: "circle",
+        symbolSize: 8,
+        lineStyle: { width: 2.5, color: colorPrimary, shadowColor: alpha(colorPrimary, 0.55), shadowBlur: 14, shadowOffsetY: 2 },
+        emphasis: { focus: "series", scale: 1.4 },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: alpha(colorPrimary, 0.28) },
+            { offset: 0.7, color: alpha(colorPrimary, 0.04) },
+            { offset: 1, color: alpha(colorPrimary, 0) },
+          ]),
+        },
+      },
+      {
+        name: "Cardio",
+        type: "line",
+        smooth: 0.4,
+        data: cardio,
+        yAxisIndex: 1,
+        showSymbol: false,
+        symbol: "circle",
+        symbolSize: 7,
+        lineStyle: { width: 2, color: colorBlue, type: "dashed" },
+        emphasis: { focus: "series", scale: 1.4 },
+      },
+    ],
   });
+
+  // Redraw on container resize (htmx swaps change container size)
+  const ro = new ResizeObserver(() => chart && !chart.isDisposed() && chart.resize());
+  ro.observe(el);
 })();
 </script>
 {% endif %}
