@@ -97,7 +97,10 @@
 </div>
 
 <script>
-// Count-up hero stats: animate from 0 to the server-rendered value on load.
+// Count-up stats: animate from 0 to the server-rendered value on load.
+// Clock is wall-time via setTimeout, not requestAnimationFrame: mobile
+// battery savers throttle/suspend rAF, which froze the numbers at their
+// first frame on phones. Reduced-motion users keep the server value.
 (function() {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   document.querySelectorAll("[data-countup]").forEach(el => {
@@ -109,15 +112,16 @@
       minimumFractionDigits: decimals, maximumFractionDigits: decimals,
     });
     const duration = 900;
-    const t0 = performance.now();
+    const t0 = Date.now();
     const ease = t => 1 - Math.pow(1 - t, 3); // easeOutCubic
 
-    function frame(now) {
-      const p = Math.min(Math.max((now - t0) / duration, 0), 1);
+    function tick() {
+      const p = Math.min(Math.max((Date.now() - t0) / duration, 0), 1);
       el.textContent = fmt(target * ease(p));
-      if (p < 1) requestAnimationFrame(frame);
+      if (p < 1) setTimeout(tick, 16);
+      else el.textContent = fmt(target); // land exactly on target
     }
-    requestAnimationFrame(frame);
+    tick();
   });
 })();
 </script>

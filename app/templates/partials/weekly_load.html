@@ -1,5 +1,5 @@
-<div class="card" id="weekly-load-card">
-  <div class="section-header">
+<div class="plot-band" id="weekly-load-card">
+  <div class="plot-band-head">
     <span class="section-title"><span class="live-dot" aria-hidden="true"></span>Weekly Load <span class="section-title-suffix">· last {{ chart_weeks }} weeks</span></span>
     <div class="range-switch" role="group" aria-label="Chart range">
       {% for w in [4, 12, 26] %}
@@ -75,7 +75,7 @@
       textStyle: { ...baseText, color: colorMuted },
       itemGap: 18,
     },
-    grid: { top: 42, left: isCompact ? 8 : 12, right: isCompact ? 8 : 14, bottom: 4, containLabel: true },
+    grid: { top: 42, left: isCompact ? 4 : 10, right: isCompact ? 4 : 10, bottom: 4, containLabel: true },
     tooltip: {
       trigger: "axis",
       axisPointer: { type: "line", lineStyle: { color: alpha(colorPrimary, 0.45), width: 1 } },
