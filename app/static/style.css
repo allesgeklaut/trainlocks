@@ -1171,6 +1171,13 @@ table tbody tr:hover {
     padding-top: calc(52px + var(--space-4));
   }
 
+  /* mobile gutter = --pad-x (16px); full-bleed cards below cancel it with
+     matching negative margins */
+  .main:not(:has(> .hero)) {
+    padding-left: var(--pad-x);
+    padding-right: var(--pad-x);
+  }
+
   :root {
     --pad-x: var(--space-4);
   }
@@ -1212,8 +1219,44 @@ table tbody tr:hover {
     padding: var(--space-4);
   }
 
+  /* Full-bleed content on mobile: cards run edge-to-edge (inner padding
+     keeps text off the glass) while page headers/buttons stay in the
+     gutter. Progression's stat cards are excluded — they stay inset and
+     rounded as a contrast element. */
+  .main:not(:has(> .hero)) > .card,
+  .main:not(:has(> .hero)) > .card-grid > .card,
+  .main:not(:has(> .hero)) > .action-bar + .card,
+  .card-grid > .card {
+    margin-left: calc(-1 * var(--pad-x));
+    margin-right: calc(-1 * var(--pad-x));
+  }
+
+  /* progression: everything below the stat grid bleeds; the 4 stat cards
+     on top keep their rounded, inset look */
+  .stat-grid {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .main:not(:has(> .hero)) > #chart-section .card,
+  .main:not(:has(> .hero)) > #chart-section .card-grid > .card {
+    margin-left: calc(-1 * var(--pad-x));
+    margin-right: calc(-1 * var(--pad-x));
+    border-left: none;
+    border-right: none;
+  }
+
   .card-grid {
     grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .card-grid > .card {
+    margin-bottom: var(--space-4);
+  }
+
+  .card-grid > .card:last-child {
+    margin-bottom: 0;
   }
 }
 
