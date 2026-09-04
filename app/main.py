@@ -93,14 +93,24 @@ templates.env.globals["static_version"] = STATIC_VERSION
 
 def render_page(request: Request, template_name: str, context: dict,
                 status_code: int = 200):
-    """Render a page response.
+    """Render a page response, as a full document or an htmx fragment.
 
-    With hx-boost, htmx parses the full-document response and swaps only
-    the #app-shell element (sidebar + main) — see hx-target on <body> in
-    base.html. Always returning a complete document keeps templates
-    simple: they extend base.html and work for both normal loads and
-    boosted navigation.
+    Boosted navigation swaps #app-shell (sidebar + main + page scripts).
+    If htmx received a full document, it would insert *all* of the
+    response body's children at the swap point (htmx P() puts the entire
+    body into the fragment) — duplicating the fixed topbar/overlay/indicator
+    and re-running base scripts on every navigation. So htmx requests are
+    answered with a shell-only layout (base_shell.html): title + page
+    styles + #app-shell. Full documents (base.html) are only sent to
+    normal loads, which the browser renders from scratch.
+
+    History restores fetch the URL without an HX-Request header, so they
+    correctly receive full documents.
     """
+    is_htmx = "hx-request" in {k.lower() for k in request.headers}
+    # Per-request context (not app.state): concurrent renders must not
+    # race on the layout choice.
+    context.setdefault("layout", "base_shell.html" if is_htmx else "base.html")
     return templates.TemplateResponse(request, template_name, context,
                                       status_code=status_code)
 
@@ -249,6 +259,12 @@ async def fetch_exercise_db() -> list:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    # A boosted navigation whose session has expired lands here. The login
+    # page is a standalone document — swapping it into #app-shell would
+    # leave the dashboard chrome around it — so tell htmx to do a full
+    # browser redirect instead.
+    if "hx-request" in {k.lower() for k in request.headers}:
+        return HTMLResponse(status_code=200, headers={"HX-Redirect": "/login"})
     return templates.TemplateResponse(request, "login.html", {"error": None})
 
 

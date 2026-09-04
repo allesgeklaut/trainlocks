@@ -89,7 +89,7 @@
   </button>
   <div class="sidebar-user">
     <span class="sidebar-username">{{ user.username }}</span>
-    <form method="post" action="/logout" style="display:inline">
+    <form method="post" action="/logout" style="display:inline" hx-boost="false">
       <button type="submit" class="sidebar-logout">Sign out</button>
     </form>
   </div>

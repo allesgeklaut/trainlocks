@@ -1,0 +1,26 @@
+{# Layout for htmx request fragments (see render_page in app/main.py).
+
+   Pages extend either this or base.html depending on whether the request
+   is an htmx request. Only the swapped shell is sent: page <title> plus
+   #app-shell (sidebar + main). The title is consumed by htmx after every
+   swap and applied to the document; a swap must never include the static
+   <head> chrome or the fixed body chrome (topbar/overlay/indicator) or
+   base scripts, so those live only in the full-document layout base.html.
+
+   The page's {% block styles %} / {% block scripts %} render INSIDE
+   #app-shell so each swap replaces them together with the content —
+   anything left outside the swap target would linger in <body> and
+   accumulate across navigations. #}
+
+<title>{% block title %}{% endblock %}</title>
+
+<div id="app-shell" class="app-shell">
+  {% block styles %}{% endblock %}
+  {% include "partials/nav.html" %}
+
+  <main class="main" id="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block scripts %}{% endblock %}
+</div>
