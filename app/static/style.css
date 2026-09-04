@@ -361,6 +361,14 @@ textarea {
   color: var(--color-text);
 }
 
+/* ── App shell: htmx swap wrapper ──────────────────────────────────────── */
+/* #app-shell wraps sidebar + main so hx-boost can swap them together, but
+   it must not participate in the body's sidebar/main grid — display:contents
+   dissolves it for layout while keeping it as a DOM target. */
+#app-shell {
+  display: contents;
+}
+
 /* ── Main content ──────────────────────────────────────────────────────── */
 .main {
   min-width: 0;
