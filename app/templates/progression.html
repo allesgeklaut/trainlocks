@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends layout %}
 {% block title %}Progression — Training Log{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -50,13 +50,13 @@
       <div class="section-header">
         <span class="section-title" id="weight-chart-title">Top Weight per Session</span>
       </div>
-      <div class="chart-container"><canvas id="weightChart"></canvas></div>
+      <div class="chart-container"><div id="weightChart" style="width:100%;height:100%"></div></div>
     </div>
     <div class="card">
       <div class="section-header">
         <span class="section-title">Total Volume per Session</span>
       </div>
-      <div class="chart-container"><canvas id="volumeChart"></canvas></div>
+      <div class="chart-container"><div id="volumeChart" style="width:100%;height:100%"></div></div>
     </div>
   </div>
   <div class="card">
@@ -146,7 +146,7 @@
 
 {% block scripts %}
 {% if selected_exercise %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
 <script>
 (async function() {
   const exerciseId = {{ selected_exercise.id }};
@@ -207,71 +207,39 @@
     });
   }
 
-  // ── Chart theming ────────────────────────────────────────────────────
-  const tooltip = {
+  // ── ECharts theming ──────────────────────────────────────────────────
+  function alpha(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+
+  const baseText = { color: colorMuted, fontFamily: fontBody, fontSize: isCompact ? 10 : 12 };
+  const baseGrid = { top: 30, left: 12, right: 14, bottom: 4, containLabel: true };
+  const baseTooltip = {
+    trigger: "axis",
     backgroundColor: colorSurface,
     borderColor: colorBorder,
     borderWidth: 1,
-    titleColor: colorText,
-    bodyColor: colorMuted,
-    titleFont: { family: fontBody, weight: "600", size: 12 },
-    bodyFont: { family: fontBody, size: 12 },
-    padding: 10,
-    cornerRadius: 10,
-    boxPadding: 4,
+    padding: [10, 14],
+    textStyle: { color: colorText, fontFamily: fontBody, fontSize: 12 },
+    extraCssText: "border-radius:12px;box-shadow:0 8px 24px -8px rgba(0,0,0,.5);backdrop-filter:blur(6px);",
   };
-
-  const baseOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: { duration: 700, easing: "easeOutQuart" },
-    plugins: {
-      legend: { display: false },
-      tooltip: {
-        backgroundColor: style.getPropertyValue("--color-surface-2").trim(),
-        titleColor: colorText,
-        bodyColor: colorMuted,
-        borderColor: style.getPropertyValue("--color-border").trim(),
-        borderWidth: 1,
-        padding: 10,
-      },
-    },
-    scales: {
-      x: {
-        // Bars already default to offset; this insets the line chart's
-        // first/last points by half a category width so they align with
-        // the bar categories.
-        offset: true,
-        ticks: {
-          color: colorMuted,
-          font: { size: isCompact ? 9 : 11 },
-          maxRotation: isCompact ? 45 : 0,
-          minRotation: isCompact ? 45 : 0,
-          autoSkip: true,
-          maxTicksLimit: isCompact ? 5 : undefined,
-        },
-        grid: { display: false },
-        border: { display: false },
-      },
-      y: {
-        ticks: {
-          color: colorMuted,
-          font: { size: isCompact ? 9 : 11 },
-          maxTicksLimit: isCompact ? 5 : undefined,
-          callback: v => Intl.NumberFormat("en", { notation: "compact" }).format(v),
-        },
-        grid: { color: colorDivider },
-        border: { display: false },
-      },
-    },
+  const baseXAxis = {
+    type: "category",
+    data: labels,
+    axisLine: { show: false },
+    axisTick: { show: false },
+    // "auto" lets ECharts thin out overlapping labels on both desktop and
+    // mobile; a fixed interval shows every Nth label even when crowded.
+    axisLabel: { ...baseText, rotate: isCompact ? 45 : 0, interval: "auto", hideOverlap: true },
   };
-
-  function makeGradient(ctx, color, alpha) {
-    const g = ctx.createLinearGradient(0, 0, 0, 280);
-    g.addColorStop(0, color + alpha);
-    g.addColorStop(1, color + "00");
-    return g;
-  }
+  const baseYAxis = {
+    type: "value",
+    axisLine: { show: false },
+    axisTick: { show: false },
+    axisLabel: { ...baseText, formatter: v => Intl.NumberFormat("en", { notation: "compact" }).format(v) },
+    splitLine: { lineStyle: { color: colorDivider, type: [4, 6] } },
+  };
 
   // ── Top weight chart ─────────────────────────────────────────────────
   // Weighted: top added weight. Bodyweight: effective load incl. bodyweight
@@ -281,60 +249,77 @@
     ? "Top Load per Session (incl. bodyweight)"
     : "Top Weight per Session (kg)";
 
-  const wCtx = document.getElementById("weightChart").getContext("2d");
-  new Chart(wCtx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [{
-        data: weightValues,
-        borderColor: colorPrimary,
-        backgroundColor: makeGradient(wCtx, colorPrimary, "33"),
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        pointBackgroundColor: colorPrimary,
-        pointBorderColor: colorSurface,
-        pointBorderWidth: 2,
-        fill: true,
-        tension: 0.4,
-      }]
-    },
-    options: {
-      ...baseOptions,
-      scales: {
-        ...baseOptions.scales,
-        y: { ...baseOptions.scales.y, beginAtZero: !isBodyweight },
+  const weightEl = document.getElementById("weightChart");
+  const weightChart = echarts.init(weightEl, null, { renderer: "canvas" });
+  weightChart.setOption({
+    animationDuration: 900,
+    animationEasing: "cubicOut",
+    textStyle: { fontFamily: fontBody },
+    grid: baseGrid,
+    tooltip: {
+      ...baseTooltip,
+      axisPointer: { type: "line", lineStyle: { color: alpha(colorPrimary, 0.45), width: 1 } },
+      formatter: (params) => {
+        const p = params[0];
+        return `<div style="font-weight:600;color:${colorText};margin-bottom:6px">${chartData[p.dataIndex].date}</div>` +
+          `<div style="color:${colorMuted}">${Number(p.value).toLocaleString("en")} kg</div>`;
       },
     },
+    xAxis: { ...baseXAxis, boundaryGap: false, axisPointer: { show: true, lineStyle: { color: alpha(colorPrimary, 0.35) } } },
+    yAxis: { ...baseYAxis, min: isBodyweight ? undefined : 0 },
+    series: [{
+      type: "line",
+      smooth: 0.4,
+      showSymbol: false,
+      symbol: "circle",
+      symbolSize: 8,
+      data: weightValues,
+      lineStyle: { width: 2.5, color: colorPrimary, shadowColor: alpha(colorPrimary, 0.55), shadowBlur: 14, shadowOffsetY: 2 },
+      emphasis: { focus: "series", scale: 1.4 },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: alpha(colorPrimary, 0.28) },
+          { offset: 0.7, color: alpha(colorPrimary, 0.04) },
+          { offset: 1, color: alpha(colorPrimary, 0) },
+        ]),
+      },
+    }],
   });
 
   // ── Volume chart ─────────────────────────────────────────────────────
   // kg × reps for weighted exercises; plain rep count for bodyweight.
-  const vCtx = document.getElementById("volumeChart").getContext("2d");
-  new Chart(vCtx, {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [{
-        label: isBodyweight ? "Reps" : "Volume",
-        data: chartData.map(r => r.volume),
-        backgroundColor: colorBlue + "cc",
-        borderColor: colorBlue,
-        borderWidth: 0,
-        borderRadius: 6,
-        maxBarThickness: 42,
-        hoverBackgroundColor: colorBlue,
-      }]
-    },
-    options: {
-      ...baseOptions,
-      scales: {
-        ...baseOptions.scales,
-        y: { ...baseOptions.scales.y, beginAtZero: true },
+  const volumeEl = document.getElementById("volumeChart");
+  const volumeChart = echarts.init(volumeEl, null, { renderer: "canvas" });
+  volumeChart.setOption({
+    animationDuration: 900,
+    animationEasing: "cubicOut",
+    textStyle: { fontFamily: fontBody },
+    grid: baseGrid,
+    tooltip: {
+      ...baseTooltip,
+      axisPointer: { type: "shadow" },
+      formatter: (params) => {
+        const p = params[0];
+        const unit = isBodyweight ? " reps" : " kg × reps";
+        return `<div style="font-weight:600;color:${colorText};margin-bottom:6px">${chartData[p.dataIndex].date}</div>` +
+          `<div style="color:${colorMuted}">${Number(p.value).toLocaleString("en")}${unit}</div>`;
       },
     },
+    xAxis: baseXAxis,
+    yAxis: { ...baseYAxis, min: 0 },
+    series: [{
+      type: "bar",
+      barWidth: "55%",
+      data: chartData.map(r => r.volume),
+      itemStyle: { borderRadius: [6, 6, 0, 0], color: alpha(colorBlue, 0.85) },
+    }],
   });
+
+  // Redraw on container resize (htmx swaps change container size)
+  const roWeight = new ResizeObserver(() => weightChart && !weightChart.isDisposed() && weightChart.resize());
+  roWeight.observe(weightEl);
+  const roVolume = new ResizeObserver(() => volumeChart && !volumeChart.isDisposed() && volumeChart.resize());
+  roVolume.observe(volumeEl);
 })();
 </script>
 {% endif %}
