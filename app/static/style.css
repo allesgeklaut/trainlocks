@@ -370,8 +370,16 @@ textarea {
 }
 
 /* ── Main content ──────────────────────────────────────────────────────── */
+/* Dashboard is full-bleed (hero + KPI band run edge-to-edge); every other
+   page keeps the classic inset padding. */
 .main {
   min-width: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.main:not(:has(> .hero)) {
   padding: var(--space-8);
 }
 
@@ -396,18 +404,14 @@ textarea {
 }
 
 /* ── Dashboard hero ────────────────────────────────────────────────────── */
+/* Extreme full-bleed: the hero IS the page top. Square edges, oversized
+   type, no gradients on text. */
 .hero {
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  background:
-    radial-gradient(600px 220px at 88% -30%, oklch(from var(--color-primary) l c h / 0.08), transparent 65%),
-    radial-gradient(500px 260px at -10% 120%, oklch(from var(--color-blue) l c h / 0.06), transparent 60%),
-    linear-gradient(180deg, var(--color-surface-2), var(--color-surface));
-  box-shadow: var(--shadow-md);
-  margin-bottom: var(--space-6);
-  padding: var(--space-8);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-10) clamp(var(--space-6), 4vw, var(--space-12));
 }
 
 /* fine blueprint grid, fading out toward the edges */
@@ -416,11 +420,11 @@ textarea {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(oklch(from var(--color-text) l c h / 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, oklch(from var(--color-text) l c h / 0.03) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: radial-gradient(75% 90% at 50% 0%, #000 30%, transparent 100%);
-  -webkit-mask-image: radial-gradient(75% 90% at 50% 0%, #000 30%, transparent 100%);
+    linear-gradient(oklch(from var(--color-text) l c h / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, oklch(from var(--color-text) l c h / 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(180deg, #000 20%, transparent 95%);
+  -webkit-mask-image: linear-gradient(180deg, #000 20%, transparent 95%);
   pointer-events: none;
 }
 
@@ -430,7 +434,7 @@ textarea {
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: var(--space-6);
+  gap: var(--space-8);
 }
 
 /* terminal-heritage eyebrow: ~/dashboard + blinking caret */
@@ -466,44 +470,34 @@ textarea {
 }
 
 .hero-title {
-  font-size: clamp(1.8rem, 1.3rem + 2.2vw, 2.6rem);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.05;
+  font-size: clamp(2.6rem, 1.2rem + 6.5vw, 6.5rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
 }
 
 .hero-title em {
   font-style: normal;
-  background: linear-gradient(92deg, var(--color-primary), var(--color-blue));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-}
-
-.hero-subtitle {
-  color: var(--color-text-muted);
-  font-size: var(--text-sm);
-  margin-top: var(--space-2);
-  max-width: 52ch;
+  color: var(--color-primary);
 }
 
 .hero-stats {
   display: flex;
-  gap: var(--space-8);
+  gap: clamp(var(--space-8), 4vw, var(--space-12));
   flex-wrap: wrap;
 }
 
 .hero-stat {
-  min-width: 88px;
+  min-width: 110px;
 }
 
 .hero-stat-value {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums lining-nums;
-  font-size: var(--text-lg);
+  font-size: clamp(1.75rem, 1.2rem + 2.2vw, 3.25rem);
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1;
+  letter-spacing: -0.03em;
 }
 
 .hero-stat-value span {
@@ -513,86 +507,65 @@ textarea {
 .hero-stat-label {
   font-size: var(--text-xs);
   color: var(--color-text-muted);
-  margin-top: var(--space-1);
-  letter-spacing: 0.04em;
+  margin-top: var(--space-2);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
 }
 
 /* ── KPI cards ─────────────────────────────────────────────────────────── */
+/* Full-bleed band of giant numerals, no card chrome — the page background
+   is the card. Dividers replace borders. */
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-4);
-  margin-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
 }
 
 .kpi-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: var(--space-5) var(--space-6);
-  box-shadow: var(--shadow-sm);
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: clamp(var(--space-6), 3vw, var(--space-10)) clamp(var(--space-6), 4vw, var(--space-12));
   position: relative;
   overflow: hidden;
   text-decoration: none;
-  transition: transform var(--transition-interactive),
-    border-color var(--transition-interactive),
-    box-shadow var(--transition-interactive);
+  border-right: 1px solid var(--color-border);
+  transition: background var(--transition-interactive);
+}
+
+.kpi-card:last-child {
+  border-right: none;
 }
 
 a.kpi-card:hover {
-  transform: translateY(-2px);
-  border-color: oklch(from var(--color-primary) l c h / 0.3);
-  box-shadow: var(--shadow-glow);
+  background: oklch(from var(--color-primary) l c h / 0.05);
 }
 
 a.kpi-card:hover .kpi-value {
   color: var(--color-primary);
-}
-
-/* soft lime halo rising from the top edge on hover */
-a.kpi-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 10%;
-  right: 10%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
-  opacity: 0.25;
-  transition: opacity var(--transition-interactive);
-}
-
-a.kpi-card:hover::before {
-  opacity: 1;
-}
-
-.kpi-label {
-  font-size: var(--text-xs);
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  margin-bottom: var(--space-2);
-  font-weight: 600;
+  transform: translateX(6px);
 }
 
 .kpi-value {
-  font-size: clamp(1.8rem, 1.4rem + 1.6vw, 2.4rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: clamp(3rem, 2rem + 5vw, 6rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums lining-nums;
   color: var(--color-text);
   font-family: var(--font-mono);
-  line-height: 1;
+  line-height: 0.9;
+  transition: color var(--transition-interactive), transform var(--transition-interactive);
 }
 
 .kpi-hint {
   font-size: var(--text-xs);
   color: var(--color-text-faint);
   font-family: var(--font-mono);
-  margin-top: var(--space-2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .chart-box {
@@ -601,13 +574,26 @@ a.kpi-card:hover::before {
 }
 
 /* ── Cards / sections ──────────────────────────────────────────────────── */
+/* content below the full-bleed bands; cards keep the squared, full-bleed
+   look — separated by hairlines instead of floating with radii */
+.dash-body {
+  padding: var(--space-8) clamp(var(--space-6), 4vw, var(--space-12));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.dash-body .card {
+  border-radius: 0;
+}
+
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: var(--space-6);
   box-shadow: var(--shadow-sm);
-  margin-bottom: var(--space-6);
+  margin-bottom: 0;
   position: relative;
   overflow: hidden;
 }
@@ -1152,17 +1138,29 @@ table tbody tr:hover {
     padding-top: calc(52px + var(--space-4));
   }
 
+  .hero {
+    padding: var(--space-8) var(--space-4) var(--space-6);
+  }
+
   .kpi-grid {
     grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-2);
   }
 
   .kpi-card {
-    padding: var(--space-3) var(--space-4);
+    padding: var(--space-5) var(--space-3);
   }
 
-  .kpi-label {
-    letter-spacing: 0.05em;
+  .kpi-value {
+    font-size: clamp(2rem, 9vw, 3rem);
+  }
+
+  .kpi-hint {
+    letter-spacing: 0.04em;
+  }
+
+  .dash-body {
+    padding: var(--space-4);
+    gap: var(--space-4);
   }
 
   .chart-box {
@@ -1386,43 +1384,6 @@ table tbody tr:hover {
 /* ═══ SPICE LAYER ═════════════════════════════════════════════════════════
    Signature moments layered on the performance-lab base. Everything here
    respects prefers-reduced-motion and degrades to the static base. */
-
-/* ── Hero aurora: two slowly-drifting color blobs behind the grid ──────── */
-.hero::after {
-  content: '';
-  position: absolute;
-  inset: -40%;
-  pointer-events: none;
-  background:
-    radial-gradient(38% 55% at 22% 30%, oklch(from var(--color-primary) l c h / 0.14), transparent 70%),
-    radial-gradient(32% 48% at 78% 24%, oklch(from var(--color-blue) l c h / 0.10), transparent 70%);
-  filter: blur(6px);
-  animation: aurora-drift 26s ease-in-out infinite alternate;
-  z-index: -1;
-}
-
-@keyframes aurora-drift {
-  0% {
-    transform: translate3d(-4%, -2%, 0) scale(1);
-    opacity: 0.75;
-  }
-
-  50% {
-    transform: translate3d(3%, 3%, 0) scale(1.08);
-    opacity: 1;
-  }
-
-  100% {
-    transform: translate3d(5%, -3%, 0) scale(0.96);
-    opacity: 0.8;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .hero::after {
-    animation: none;
-  }
-}
 
 /* ── Hero: streak badge gets a live heartbeat ──────────────────────────── */
 @keyframes heartbeat {

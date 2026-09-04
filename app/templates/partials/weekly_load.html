@@ -17,7 +17,6 @@
   </div>
 
   {% if weekly_activity %}
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
   <div id="activityChart" class="chart-box chart-swap-enter"></div>
   {% else %}
   <p class="text-muted" style="text-align:center;padding:var(--space-6)">No training data yet. Log your first session to see activity!</p>
@@ -26,9 +25,15 @@
 
 {% if weekly_activity %}
 <script>
+// Load echarts lazily and render the chart. The CDN <script src> lives
+// here (injected via JS) because script tags inside an htmx-swapped
+// fragment never execute — a plain <script src> in the partial only
+// works on full page loads, leaving "echarts is not defined" after
+// every boosted navigation.
 (function() {
-  const activityData = {{ weekly_activity | tojson }};
-  if (activityData.length === 0) return;
+  function render() {
+    const activityData = {{ weekly_activity | tojson }};
+    if (activityData.length === 0) return;
 
   const style = getComputedStyle(document.documentElement);
   const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
@@ -154,6 +159,18 @@
   // Redraw on container resize (htmx swaps change container size)
   const ro = new ResizeObserver(() => chart && !chart.isDisposed() && chart.resize());
   ro.observe(el);
+  }
+
+  // Already available (full page load, or cached from a previous visit)?
+  // Otherwise inject the CDN script and render once it lands.
+  if (window.echarts) {
+    render();
+  } else {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js";
+    s.onload = render;
+    document.head.appendChild(s);
+  }
 })();
 </script>
 {% endif %}
