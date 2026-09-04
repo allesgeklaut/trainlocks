@@ -1324,6 +1324,7 @@ table tbody tr:hover {
     opacity: 0;
     transform: translateY(6px) scale(0.995);
   }
+
   to {
     opacity: 1;
     transform: none;
@@ -1370,4 +1371,156 @@ table tbody tr:hover {
 .boost-indicator.htmx-swapping {
   width: 100%;
   opacity: 0.6;
+}
+/* ═══ SPICE LAYER ═════════════════════════════════════════════════════════
+   Signature moments layered on the performance-lab base. Everything here
+   respects prefers-reduced-motion and degrades to the static base. */
+
+/* ── Hero aurora: two slowly-drifting color blobs behind the grid ──────── */
+.hero::after {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 55% at 22% 30%, oklch(from var(--color-primary) l c h / 0.14), transparent 70%),
+    radial-gradient(32% 48% at 78% 24%, oklch(from var(--color-blue) l c h / 0.10), transparent 70%);
+  filter: blur(6px);
+  animation: aurora-drift 26s ease-in-out infinite alternate;
+  z-index: -1;
+}
+
+@keyframes aurora-drift {
+  0% {
+    transform: translate3d(-4%, -2%, 0) scale(1);
+    opacity: 0.75;
+  }
+  50% {
+    transform: translate3d(3%, 3%, 0) scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(5%, -3%, 0) scale(0.96);
+    opacity: 0.8;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero::after {
+    animation: none;
+  }
+}
+
+/* ── Hero: streak badge gets a live heartbeat ──────────────────────────── */
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  12% { transform: scale(1.22); }
+  24% { transform: scale(1); }
+  36% { transform: scale(1.16); }
+  48% { transform: scale(1); }
+}
+
+.hero-stat-value .stat-unit {
+  display: inline-block;
+  text-shadow: 0 0 12px oklch(from var(--color-primary) l c h / 0.6);
+  animation: heartbeat 4.5s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-stat-value .stat-unit {
+    animation: none;
+  }
+}
+
+/* ── KPI spotlight: cursor-tracking radial highlight ───────────────────── */
+a.kpi-card {
+  --mx: 50%;
+  --my: 50%;
+}
+
+/* radial glow follows the pointer (position updated by JS) */
+a.kpi-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(220px circle at var(--mx) var(--my),
+    oklch(from var(--color-primary) l c h / 0.09), transparent 65%);
+  opacity: 0;
+  transition: opacity var(--transition-interactive);
+  pointer-events: none;
+}
+
+a.kpi-card:hover::after {
+  opacity: 1;
+}
+
+/* ── Chart card: live pulse dot next to the title ──────────────────────── */
+.live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  margin-right: var(--space-2);
+  position: relative;
+  top: -1px;
+  box-shadow: 0 0 8px oklch(from var(--color-primary) l c h / 0.7);
+}
+
+.live-dot::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid oklch(from var(--color-primary) l c h / 0.5);
+  animation: live-ping 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes live-ping {
+  0% {
+    transform: scale(0.5);
+    opacity: 1;
+  }
+  80%, 100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot::after {
+    animation: none;
+  }
+}
+
+/* ── Sidebar: ambient brand edge ───────────────────────────────────────── */
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -1px;
+  width: 1px;
+  height: 180px;
+  background: linear-gradient(180deg,
+    transparent,
+    oklch(from var(--color-primary) l c h / 0.5),
+    transparent);
+  animation: edge-breathe 8s ease-in-out infinite;
+}
+
+.sidebar {
+  position: sticky;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar::after {
+    animation: none;
+    opacity: 0.4;
+  }
+}
+
+@keyframes edge-breathe {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 0.9; transform: translateY(240px); }
 }
