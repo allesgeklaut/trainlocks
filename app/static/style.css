@@ -54,6 +54,7 @@
   --shadow-glow: 0 0 0 1px #e9456033, 0 4px 20px -4px #e9456040;
   --transition-interactive: 160ms cubic-bezier(0.16, 1, 0.3, 1);
   --content-default: 1140px;
+  --pad-x: clamp(var(--space-6), 4vw, var(--space-12));
   --sidebar-w: 244px;
   --font-body: "Satoshi", "Inter", sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
@@ -411,7 +412,7 @@ textarea {
   overflow: hidden;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
-  padding: var(--space-10) clamp(var(--space-6), 4vw, var(--space-12));
+  padding: var(--space-10) var(--pad-x);
 }
 
 /* fine blueprint grid, fading out toward the edges */
@@ -574,28 +575,60 @@ a.kpi-card:hover .kpi-value {
 }
 
 /* ── Cards / sections ──────────────────────────────────────────────────── */
-/* content below the full-bleed bands; cards keep the squared, full-bleed
-   look — separated by hairlines instead of floating with radii */
-.dash-body {
-  padding: var(--space-8) clamp(var(--space-6), 4vw, var(--space-12));
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-}
-
-.dash-body .card {
-  border-radius: 0;
-}
-
+/* Squared cards app-wide: the dashboard's full-bleed language, applied
+   everywhere — no floating rounded panels anywhere in the app. */
 .card {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   padding: var(--space-6);
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 0;
+  box-shadow: none;
+  margin-bottom: var(--space-6);
   position: relative;
   overflow: hidden;
+}
+
+/* Shared page gutter: hero header, plot-band header and inset cards all
+   align to the same vertical rhythm. (--pad-x is defined with the tokens) */
+
+/* content below the full-bleed bands */
+.dash-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: 0 0 var(--space-10);
+}
+
+.dash-body .card {
+  margin: 0 var(--pad-x);
+  margin-bottom: 0;
+}
+
+/* ── Full-bleed plot band (Weekly Load) ──────────────────────────────────
+   Breaks out of the page gutter: hairline top/bottom, chart canvas runs
+   edge-to-edge under a padded header row. */
+.plot-band {
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-6) 0 var(--space-4);
+}
+
+.plot-band-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: 0 var(--pad-x);
+  margin-bottom: var(--space-2);
+}
+
+/* edge-to-edge chart canvas: the band has no side padding, so the canvas
+   already spans sidebar-to-screen-edge; just size it fully */
+.plot-band .chart-box {
+  height: 320px;
+  width: 100%;
 }
 
 .card-title {
@@ -793,7 +826,7 @@ table tbody tr:hover {
 /* ── Session logging grid ───────────────────────────────────────────────── */
 .exercise-block {
   background: var(--color-surface-offset);
-  border-radius: var(--radius-lg);
+  border-radius: 0;
   padding: var(--space-4) var(--space-5);
   margin-bottom: var(--space-4);
   border: 1px solid var(--color-border);
@@ -1138,8 +1171,12 @@ table tbody tr:hover {
     padding-top: calc(52px + var(--space-4));
   }
 
+  :root {
+    --pad-x: var(--space-4);
+  }
+
   .hero {
-    padding: var(--space-8) var(--space-4) var(--space-6);
+    padding: var(--space-8) var(--pad-x) var(--space-6);
   }
 
   .kpi-grid {
@@ -1159,11 +1196,11 @@ table tbody tr:hover {
   }
 
   .dash-body {
-    padding: var(--space-4);
-    gap: var(--space-4);
+    gap: var(--space-6);
+    padding-bottom: var(--space-6);
   }
 
-  .chart-box {
+  .plot-band .chart-box {
     height: 240px;
   }
 
