@@ -1343,7 +1343,8 @@ table tbody tr:hover {
   animation: chart-swap-in 320ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* htmx request-in-flight pulse on the chart card */
+/* htmx request-in-flight dim on the chart card (range buttons set
+   hx-indicator="#weekly-load-card") */
 .htmx-request .chart-box,
 .chart-box.htmx-request {
   opacity: 0.45;
@@ -1369,13 +1370,14 @@ table tbody tr:hover {
   box-shadow: 0 0 8px oklch(from var(--color-primary) l c h / 0.6);
 }
 
-.htmx-request .boost-indicator,
+/* indicator is on <body> for boosted navs (hx-indicator="#boost-indicator"):
+   htmx puts htmx-request on the requesting element, so only the direct
+   form matches — there is no .htmx-request ancestor. */
 .boost-indicator.htmx-request {
   opacity: 1;
   width: 70%;
 }
 
-.htmx-request .boost-indicator.htmx-swapping,
 .boost-indicator.htmx-swapping {
   width: 100%;
   opacity: 0.6;

@@ -567,3 +567,52 @@ def test_profile_bodyweight_rejects_zero_nan_inf(client):
     resp = client.post("/profile", data={"bodyweight": "72.5"}, follow_redirects=False)
     assert resp.status_code == 303
     assert 'value="72.5"' in client.get("/profile").text
+
+
+def test_normal_page_loads_are_full_documents(client):
+    """Without HX-Request, pages render the full base.html layout."""
+    html = client.get("/").text
+    assert "<html" in html
+    assert 'hx-boost="true"' in html
+    assert 'id="app-shell"' in html
+
+
+def test_htmx_requests_get_shell_fragments(client):
+    """Boosted navigation must swap #app-shell only: the response carries
+    the shell plus page <title>, but no <html>/<head> chrome, no fixed
+    body chrome (topbar/overlay/indicator) and no base scripts — htmx
+    would insert everything else at the swap point and duplicate it."""
+    resp = client.get("/exercises", headers={"HX-Request": "true"})
+    html = resp.text
+    assert resp.status_code == 200
+    assert "<html" not in html
+    assert "<title>" in html and "Exercises" in html
+    assert 'id="app-shell"' in html
+    assert "mobile-topbar" not in html
+    assert "boost-indicator" not in html
+    assert "sidebar-overlay" not in html
+    # hx-boost itself must not appear in the fragment head — the only
+    # occurrence is the logout form's deliberate hx-boost="false" opt-out.
+    assert 'hx-boost="true"' not in html
+    assert 'hx-boost="false"' in html
+
+
+def test_htmx_fragments_carry_page_scripts_inside_the_shell(client):
+    """Page scripts/styles live inside #app-shell so a swap replaces them
+    together with the content instead of accumulating as body children."""
+    html = client.get("/", headers={"HX-Request": "true"}).text
+    shell_start = html.index('id="app-shell"')
+    assert html.rindex("<script>") > shell_start  # count-up script is inside
+
+
+def test_boosted_redirect_to_login_uses_hx_redirect(client):
+    """An expired session behind hx-boost must end in an HX-Redirect so
+    htmx performs a full browser navigation to the standalone login page.
+    The auth dependency 303s to /login; htmx's XHR transparently follows
+    the redirect (re-sending HX-Request), and login_page then answers
+    with the header that makes htmx replace the whole page."""
+    with TestClient(app) as anon:
+        resp = anon.get("/sessions", headers={"HX-Request": "true"},
+                        follow_redirects=True)
+    assert resp.status_code == 200
+    assert resp.headers["HX-Redirect"] == "/login"

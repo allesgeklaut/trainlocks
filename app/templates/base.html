@@ -31,17 +31,15 @@
       }
     });
 
-    document.addEventListener('DOMContentLoaded', () => {
-      // Only suppress Enter on multi-row logging forms (marked with
-      // data-suppress-enter); every other form (login, name fields, …)
-      // must keep Enter-to-submit working.
-      document.querySelectorAll('form[data-suppress-enter]').forEach(form => {
-        form.addEventListener('keydown', e => {
-          if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
-            e.preventDefault();
-          }
-        });
-      });
+    // Delegated Enter-suppression for multi-row logging forms (marked
+    // with data-suppress-enter); every other form (login, name fields, …)
+    // keeps Enter-to-submit. Delegation (not per-form binding on
+    // DOMContentLoaded) so it also covers forms swapped in by htmx —
+    // DOMContentLoaded has already fired by then.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.target.tagName === 'BUTTON') return;
+      const form = e.target.closest('form[data-suppress-enter]');
+      if (form) e.preventDefault();
     });
   </script>
 
@@ -95,9 +93,10 @@
       }
 
       // ── Theme toggle: delegated on <body> so it survives htmx swaps ──
-      // Guard: htmx re-executes body scripts on boosted swaps, and this
-      // listener must be attached exactly once or each click flips the
-      // theme N times (N = swaps since load), leaving it unchanged.
+      // Guard: the fragment layout (base_shell.html) re-sends these body
+      // scripts inside #app-shell on every boosted swap, and this listener
+      // must be attached exactly once or each click flips the theme N
+      // times (N = swaps since load), leaving it unchanged.
       if (!window.__trainlocksThemeWired) {
         window.__trainlocksThemeWired = true;
         document.body.addEventListener("click", (e) => {
@@ -122,9 +121,10 @@
     // Delegated on <body> so it survives htmx swaps: #app-shell (and the
     // sidebar inside it) is replaced on every boosted navigation, so any
     // reference captured at load time goes stale.
-    // Guard: htmx re-executes body scripts on boosted swaps, and this
-    // listener must be attached exactly once or each click toggles the
-    // drawer N times (N = swaps since load), leaving it unchanged.
+    // Guard: the fragment layout (base_shell.html) re-sends these body
+    // scripts inside #app-shell on every boosted swap, and this listener
+    // must be attached exactly once or each click toggles the drawer N
+    // times (N = swaps since load), leaving it unchanged.
     if (!window.__trainlocksMobileNavWired) {
       window.__trainlocksMobileNavWired = true;
       document.body.addEventListener("click", (e) => {
@@ -165,25 +165,6 @@
     // Morph swaps with the View Transitions API where the browser
     // supports it; graceful instant swap everywhere else.
     htmx.config.globalViewTransitions = true;
-
-    // Re-run per-page scripts after any boosted swap: the fragment that
-    // replaces #app-shell carries <script> tags (chart init etc.) which
-    // htmx does not execute. Cloning forces re-execution.
-    document.addEventListener('htmx:afterSettle', (e) => {
-      if (!e.detail || !e.detail.elt || e.detail.elt !== document.body) return;
-      document.querySelectorAll('#app-shell script[src]').forEach((old) => {
-        const s = document.createElement('script');
-        s.src = old.src;
-        old.replaceWith(s);
-      });
-      document.querySelectorAll('#app-shell script:not([src])').forEach((old) => {
-        const s = document.createElement('script');
-        s.textContent = old.textContent;
-        old.replaceWith(s);
-      });
-      // Repaint theme icon state for the freshly swapped sidebar
-      if (window.__trainlocksRepaintTheme) window.__trainlocksRepaintTheme();
-    });
 
     // ── KPI spotlight: track the pointer over any kpi card ─────────
     // Delegated so it works for cards swapped in by htmx too.
