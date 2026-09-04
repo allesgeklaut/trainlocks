@@ -130,6 +130,8 @@
       document.body.addEventListener("click", (e) => {
         // Resolve fresh on every click — never cache these nodes.
         const toggle = e.target.closest("#menu-toggle");
+        // Desktop drawer trigger: the ~/… eyebrow in each page header.
+        const eyebrowToggle = e.target.closest("[data-nav-toggle]");
         const overlayClicked = e.target.closest("#sidebar-overlay");
         const sidebar = document.getElementById("sidebar");
         const overlay = document.getElementById("sidebar-overlay");
@@ -147,7 +149,7 @@
         };
 
         const navLink = e.target.closest(".nav-link");
-        if (toggle) {
+        if (toggle || eyebrowToggle) {
           sidebar.classList.contains("open") ? closeMenu() : openMenu();
         } else if (overlayClicked) {
           closeMenu();
