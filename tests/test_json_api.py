@@ -362,7 +362,8 @@ def test_dashboard_cardio_load_scales_by_activity(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert '"cardio_load": 8.0' in resp.text
-    assert "Cardio Load" in resp.text
+    # ECharts axis title (title-case matches the chart config)
+    assert "Cardio load" in resp.text
 
 
 def test_dashboard_bodyweight_load_scaling(client):
