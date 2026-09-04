@@ -1,6 +1,6 @@
 <div class="card" id="weekly-load-card">
   <div class="section-header">
-    <span class="section-title">Weekly Load <span class="section-title-suffix">· last {{ chart_weeks }} weeks</span></span>
+    <span class="section-title"><span class="live-dot" aria-hidden="true"></span>Weekly Load <span class="section-title-suffix">· last {{ chart_weeks }} weeks</span></span>
     <div class="range-switch" role="group" aria-label="Chart range">
       {% for w in [4, 12, 26] %}
       <button type="button"
@@ -44,6 +44,44 @@
   const isCompact = window.matchMedia("(max-width: 768px)").matches;
   const shortLabel = l => l.replace(/^\d{4}-W/, "W");
 
+  // ── neon glow plugin: outer shadow on the strength line ──────────
+  const glowPlugin = {
+    id: "lineGlow",
+    beforeDatasetsDraw(chart) {
+      chart.ctx.save();
+      chart.ctx.shadowColor = colorPrimary + "66";
+      chart.ctx.shadowBlur = 12;
+    },
+    afterDatasetsDraw(chart) {
+      chart.ctx.shadowBlur = 0;
+      chart.ctx.shadowColor = "transparent";
+    },
+  };
+
+  // ── crosshair: vertical hairline that tracks the hovered point ───
+  const crosshairPlugin = {
+    id: "crosshair",
+    afterDatasetsDraw(chart) {
+      const active = chart.getActiveElements();
+      if (!active.length) return;
+      const x = active[0].element.x;
+      const { top, bottom } = chart.chartArea;
+      const c = chart.ctx;
+      c.save();
+      const grad = c.createLinearGradient(0, top, 0, bottom);
+      grad.addColorStop(0, colorPrimary + "00");
+      grad.addColorStop(0.5, colorPrimary + "55");
+      grad.addColorStop(1, colorPrimary + "00");
+      c.strokeStyle = grad;
+      c.lineWidth = 1;
+      c.beginPath();
+      c.moveTo(x, top);
+      c.lineTo(x, bottom);
+      c.stroke();
+      c.restore();
+    },
+  };
+
   // Soft vertical gradient under the strength curve (tracks the canvas height
   // so the fade reaches fully transparent at the bottom edge, whatever the
   // responsive .chart-box height is)
@@ -67,6 +105,7 @@
 
   new Chart(ctx, {
     type: "line",
+    plugins: [glowPlugin, crosshairPlugin],
     data: {
       labels: activityData.map(d => isCompact ? shortLabel(d.date) : d.date.replace(/^\d{4}-W/, "W")),
       datasets: [{
@@ -105,6 +144,8 @@
       interaction: { mode: "index", intersect: false },
       animation: { duration: 700, easing: "easeOutQuart" },
       plugins: {
+        lineGlow: true,
+        crosshair: true,
         legend: {
           display: true,
           position: "top",

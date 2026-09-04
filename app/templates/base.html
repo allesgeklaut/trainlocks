@@ -256,6 +256,16 @@
         old.replaceWith(s);
       });
     });
+
+    // ── KPI spotlight: track the pointer over any kpi card ─────────
+    // Delegated so it works for cards swapped in by htmx too.
+    document.addEventListener('pointermove', (e) => {
+      const card = e.target.closest && e.target.closest('a.kpi-card');
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+      card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+    }, { passive: true });
   </script>
 </body>
 
