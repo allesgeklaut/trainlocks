@@ -142,8 +142,6 @@ body {
     radial-gradient(900px 420px at -15% 30%, oklch(from var(--color-blue) l c h / 0.03), transparent 55%),
     var(--color-bg);
   background-attachment: fixed;
-  display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr;
 }
 
 img,
@@ -217,17 +215,44 @@ textarea {
 }
 
 /* ── Sidebar ───────────────────────────────────────────────────────────── */
+/* Off-canvas drawer at every width: hidden until the ~/… eyebrow in the
+   page header (or the mobile hamburger) toggles it in. */
 .sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: calc(-1 * var(--sidebar-w) - 20px);
+  width: var(--sidebar-w);
   height: 100dvh;
   overflow-y: auto;
+  z-index: 150;
   background: linear-gradient(180deg, var(--color-surface), var(--color-surface-offset));
   border-right: 1px solid var(--color-border);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   padding: var(--space-6) var(--space-4);
   gap: var(--space-2);
+  transition: left 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar.open {
+  left: 0;
+}
+
+.sidebar-overlay {
+  display: block;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 99;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.sidebar-overlay.visible {
+  pointer-events: auto;
+  opacity: 1;
 }
 
 .sidebar-logo {
@@ -438,7 +463,8 @@ textarea {
   gap: var(--space-8);
 }
 
-/* terminal-heritage eyebrow: ~/dashboard + blinking caret */
+/* terminal-heritage eyebrow: ~/dashboard + blinking caret. It is a real
+   <button> that toggles the nav drawer on every viewport. */
 .hero-eyebrow {
   display: inline-flex;
   align-items: center;
@@ -448,6 +474,26 @@ textarea {
   color: var(--color-primary);
   letter-spacing: 0.08em;
   margin-bottom: var(--space-3);
+  background: none;
+  border: none;
+  padding: var(--space-1) var(--space-2);
+  margin-left: calc(-1 * var(--space-2));
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition-interactive), color var(--transition-interactive);
+}
+
+.hero-eyebrow:hover {
+  background: oklch(from var(--color-primary) l c h / 0.1);
+}
+
+.hero-eyebrow:active {
+  background: oklch(from var(--color-primary) l c h / 0.18);
+}
+
+/* page-header variant: smaller margin, sits above the title */
+.page-eyebrow {
+  margin-bottom: var(--space-2);
 }
 
 .hero-eyebrow .caret {
@@ -602,6 +648,7 @@ a.kpi-card:hover .kpi-value {
 .dash-body .card {
   margin: 0 var(--pad-x);
   margin-bottom: 0;
+  border-radius: var(--radius-xl);
 }
 
 /* ── Full-bleed plot band (Weekly Load) ──────────────────────────────────
@@ -1121,26 +1168,7 @@ table tbody tr:hover {
   border-radius: var(--radius-sm);
 }
 
-.sidebar-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  z-index: 99;
-  opacity: 0;
-  transition: opacity 0.3s;
-}
-
-.sidebar-overlay.visible {
-  display: block;
-  opacity: 1;
-}
-
 @media (max-width: 768px) {
-  body {
-    grid-template-columns: 1fr;
-  }
-
   .mobile-topbar {
     display: flex;
   }
@@ -1149,22 +1177,14 @@ table tbody tr:hover {
     display: inline-flex;
   }
 
+  /* drawer starts below the fixed topbar on mobile */
+  .sidebar {
+    top: 52px;
+    height: calc(100dvh - 52px);
+  }
+
   .sidebar-overlay {
     top: 52px;
-  }
-
-  .sidebar {
-    position: fixed;
-    top: 52px;
-    left: -100%;
-    width: var(--sidebar-w);
-    height: calc(100dvh - 52px);
-    z-index: 150;
-    transition: left 0.3s;
-  }
-
-  .sidebar.open {
-    left: 0;
   }
 
   .main {
