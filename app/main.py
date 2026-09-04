@@ -91,6 +91,30 @@ STATIC_VERSION = str(int(time.time()))
 templates.env.globals["static_version"] = STATIC_VERSION
 
 
+def render_page(request: Request, template_name: str, context: dict,
+                status_code: int = 200):
+    """Render a page response, as a full document or an htmx fragment.
+
+    Boosted navigation swaps #app-shell (sidebar + main + page scripts).
+    If htmx received a full document, it would insert *all* of the
+    response body's children at the swap point (htmx P() puts the entire
+    body into the fragment) — duplicating the fixed topbar/overlay/indicator
+    and re-running base scripts on every navigation. So htmx requests are
+    answered with a shell-only layout (base_shell.html): title + page
+    styles + #app-shell. Full documents (base.html) are only sent to
+    normal loads, which the browser renders from scratch.
+
+    History restores fetch the URL without an HX-Request header, so they
+    correctly receive full documents.
+    """
+    is_htmx = "hx-request" in {k.lower() for k in request.headers}
+    # Per-request context (not app.state): concurrent renders must not
+    # race on the layout choice.
+    context.setdefault("layout", "base_shell.html" if is_htmx else "base.html")
+    return templates.TemplateResponse(request, template_name, context,
+                                      status_code=status_code)
+
+
 def _cardio_pace_display(c) -> str:
     """Human pace string for templates (e.g. '6:00 /km', '2:00 /100m') or '—'."""
     p = _cardio_pace(c)
@@ -235,6 +259,12 @@ async def fetch_exercise_db() -> list:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    # A boosted navigation whose session has expired lands here. The login
+    # page is a standalone document — swapping it into #app-shell would
+    # leave the dashboard chrome around it — so tell htmx to do a full
+    # browser redirect instead.
+    if "hx-request" in {k.lower() for k in request.headers}:
+        return HTMLResponse(status_code=200, headers={"HX-Redirect": "/login"})
     return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
@@ -282,7 +312,7 @@ async def logout(tl_session: Optional[str] = Cookie(default=None)):
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request, user: models.User = Depends(get_current_user)):
-    return templates.TemplateResponse(request, "profile.html", {"user": user})
+    return render_page(request, "profile.html", {"user": user})
 
 
 @app.post("/profile")
@@ -309,18 +339,20 @@ async def profile_update(
 
 # ── PAGES ────────────────────────────────────────────────────────────────────
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    sessions = db.query(models.WorkoutSession).order_by(models.WorkoutSession.date.desc()).limit(5).all()
+def _dashboard_context(user: models.User, db: Session, weeks: int) -> dict:
+    """Shared data assembly for the dashboard page and its htmx chart
+    fragments so both always render identical numbers."""
+    sessions = db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.date.desc()).limit(5).all()
     exercises = db.query(models.Exercise).all()
     templates_db = db.query(models.SessionTemplate).all()
-    
-    # Training load data for dashboard chart (last 12 weeks)
+
+    # Training load data for dashboard chart (last `weeks` weeks)
     from datetime import timedelta
     from collections import defaultdict
-    # Monday of the current week; chart spans exactly 12 Monday-aligned weeks.
+    # Monday of the current week; chart spans exactly `weeks` Monday-aligned weeks.
     current_monday = date.today() - timedelta(days=date.today().weekday())
-    week_start = current_monday - timedelta(weeks=11)
+    week_start = current_monday - timedelta(weeks=weeks - 1)
     recent_sessions_full = (
         db.query(models.WorkoutSession)
         .filter(models.WorkoutSession.date >= week_start)
@@ -359,7 +391,7 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
             weekly_cardio_load[week_key] += a.distance_km * _cardio_load_factor(a.activity_type)
 
     # Dense week axis so weeks without sessions show as zero instead of
-    # being skipped. ISO weeks (isocalendar) start on Monday. Exactly 12
+    # being skipped. ISO weeks (isocalendar) start on Monday. Exactly `weeks`
     # Monday-aligned buckets; empty series when there is no data so the
     # template's "No training data yet" empty state stays reachable.
     week_cursor = week_start
@@ -407,7 +439,7 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
     )
     total_volume_t = f"{total_volume / 1000.0:,.1f}"
 
-    return templates.TemplateResponse(request, "index.html", {
+    return {
         "recent_sessions": sessions,
         "exercise_count": len(exercises),
         "template_count": len(templates_db),
@@ -416,14 +448,33 @@ async def index(request: Request, user: models.User = Depends(get_current_user),
         "week_streak": week_streak,
         "this_week_load": f"{this_week_load:,}",
         "total_volume_t": total_volume_t,
+        "chart_weeks": weeks,
         "user": user,
-    })
+    }
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return render_page(request, "index.html",
+                                      _dashboard_context(user, db, weeks=12))
+
+
+@app.get("/fragments/weekly-load", response_class=HTMLResponse)
+async def fragment_weekly_load(
+    request: Request,
+    weeks: int = Query(default=12, ge=4, le=52),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """htmx fragment: the weekly-load chart card for the requested range."""
+    ctx = _dashboard_context(user, db, weeks=weeks)
+    return templates.TemplateResponse(request, "partials/weekly_load.html", ctx)
 
 
 @app.get("/exercises", response_class=HTMLResponse)
 async def list_exercises(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
-    return templates.TemplateResponse(request, "exercises.html", {"exercises": exercises, "user": user})
+    return render_page(request, "exercises.html", {"exercises": exercises, "user": user})
 
 
 @app.post("/exercises")
@@ -470,7 +521,7 @@ async def delete_exercise(exercise_id: int, user: models.User = Depends(get_curr
 async def list_templates(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     templates_db = db.query(models.SessionTemplate).order_by(models.SessionTemplate.name).all()
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
-    return templates.TemplateResponse(request, "templates.html", {
+    return render_page(request, "templates.html", {
         "templates": templates_db, "exercises": exercises, "user": user
     })
 
@@ -527,14 +578,14 @@ async def delete_template(template_id: int, user: models.User = Depends(get_curr
 @app.get("/sessions", response_class=HTMLResponse)
 async def list_sessions(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     sessions = db.query(models.WorkoutSession).order_by(models.WorkoutSession.date.desc()).all()
-    return templates.TemplateResponse(request, "sessions.html", {"sessions": sessions, "user": user})
+    return render_page(request, "sessions.html", {"sessions": sessions, "user": user})
 
 
 @app.get("/sessions/new", response_class=HTMLResponse)
 async def new_session(request: Request, user: models.User = Depends(get_current_user), template_id: Optional[int] = None, db: Session = Depends(get_db)):
     templates_db = db.query(models.SessionTemplate).order_by(models.SessionTemplate.name).all()
     selected_template = db.get(models.SessionTemplate, template_id) if template_id else None
-    return templates.TemplateResponse(request, "new_session.html", {
+    return render_page(request, "new_session.html", {
         "templates": templates_db,
         "selected_template": selected_template, "today": date.today(), "user": user,
     })
@@ -624,7 +675,7 @@ async def view_session(session_id: int, request: Request, user: models.User = De
     sess = db.get(models.WorkoutSession, session_id)
     if not sess:
         raise HTTPException(status_code=404, detail="Session not found")
-    return templates.TemplateResponse(request, "view_session.html", {"session": sess, "user": user})
+    return render_page(request, "view_session.html", {"session": sess, "user": user})
 
 @app.post("/sessions/{session_id}/delete")
 async def delete_session(session_id: int, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -687,7 +738,7 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
             dummy_exercises.append(make_dummy(ex_sets[0].exercise, set_numbers, order_idx))
     dummy_template = DummyTemplate(sess.template_id, dummy_exercises)
 
-    return templates.TemplateResponse(request, "new_session.html", {
+    return render_page(request, "new_session.html", {
         "templates": [],
         "selected_template": dummy_template,
         "today": sess.date,
@@ -774,7 +825,7 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
 async def progression(request: Request, user: models.User = Depends(get_current_user), exercise_id: Optional[int] = None, db: Session = Depends(get_db)):
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
     selected_exercise = db.get(models.Exercise, exercise_id) if exercise_id else None
-    return templates.TemplateResponse(request, "progression.html", {
+    return render_page(request, "progression.html", {
         "exercises": exercises, "selected_exercise": selected_exercise, "user": user,
     })
 
@@ -794,7 +845,7 @@ async def cardio_page(
         .limit(50)
         .all()
     )
-    return templates.TemplateResponse(request, "cardio.html", {
+    return render_page(request, "cardio.html", {
         "activities": activities, "today": date.today(), "user": user,
     })
 
@@ -872,7 +923,7 @@ async def cardio_edit_page(
     c = db.get(models.CardioActivity, cardio_id)
     if not c:
         raise HTTPException(status_code=404, detail="Cardio activity not found")
-    return templates.TemplateResponse(request, "cardio_edit.html", {
+    return render_page(request, "cardio_edit.html", {
         "activity": c, "today": date.today(), "user": user,
     })
 
@@ -1342,7 +1393,7 @@ async def browse_exercises(
     if level:
         filtered = [ex for ex in filtered if ex.get("level") == level]
 
-    return templates.TemplateResponse(request, "browse_exercises.html", {
+    return render_page(request, "browse_exercises.html", {
         "exercises": filtered[:200],  # cap at 200 for perf
         "total": len(filtered),
         "all_categories": all_categories,
@@ -1380,7 +1431,7 @@ async def browse_plans(request: Request, user: models.User = Depends(get_current
         plans = json.load(f)
     existing_templates = {t.name for t in db.query(models.SessionTemplate).all()}
     existing_exercises = {e.name for e in db.query(models.Exercise).all()}
-    return templates.TemplateResponse(request, "browse_plans.html", {
+    return render_page(request, "browse_plans.html", {
         "plans": plans,
         "existing_templates": existing_templates,
         "existing_exercises": existing_exercises,

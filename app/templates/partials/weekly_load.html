@@ -1,0 +1,159 @@
+<div class="card" id="weekly-load-card">
+  <div class="section-header">
+    <span class="section-title"><span class="live-dot" aria-hidden="true"></span>Weekly Load <span class="section-title-suffix">· last {{ chart_weeks }} weeks</span></span>
+    <div class="range-switch" role="group" aria-label="Chart range">
+      {% for w in [4, 12, 26] %}
+      <button type="button"
+              class="{% if w == chart_weeks %}active{% endif %}"
+              hx-get="/fragments/weekly-load?weeks={{ w }}"
+              hx-target="#weekly-load-card"
+              hx-swap="outerHTML"
+              hx-indicator="#weekly-load-card"
+              hx-push-url="false">
+        {{ w }}w
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if weekly_activity %}
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <div id="activityChart" class="chart-box chart-swap-enter"></div>
+  {% else %}
+  <p class="text-muted" style="text-align:center;padding:var(--space-6)">No training data yet. Log your first session to see activity!</p>
+  {% endif %}
+</div>
+
+{% if weekly_activity %}
+<script>
+(function() {
+  const activityData = {{ weekly_activity | tojson }};
+  if (activityData.length === 0) return;
+
+  const style = getComputedStyle(document.documentElement);
+  const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
+  const colorPrimary  = style.getPropertyValue("--color-primary").trim();
+  const colorBlue     = style.getPropertyValue("--color-blue").trim();
+  const colorDivider  = style.getPropertyValue("--color-divider").trim();
+  const colorSurface  = style.getPropertyValue("--color-surface").trim();
+  const colorBorder   = style.getPropertyValue("--color-border").trim();
+  const colorText     = style.getPropertyValue("--color-text").trim();
+  const fontBody      = style.getPropertyValue("--font-body").trim();
+
+  const el = document.getElementById("activityChart");
+  const isCompact = window.matchMedia("(max-width: 768px)").matches;
+
+  const chart = echarts.init(el, null, { renderer: "canvas" });
+
+  const weeks = activityData.map(d => d.date.replace(/^\d{4}-W/, "W"));
+  const strength = activityData.map(d => d.load);
+  const cardio = activityData.map(d => d.cardio_load);
+
+  function alpha(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+  }
+
+  const baseText = { color: colorMuted, fontFamily: fontBody, fontSize: isCompact ? 10 : 12 };
+
+  chart.setOption({
+    animationDuration: 900,
+    animationEasing: "cubicOut",
+    textStyle: { fontFamily: fontBody },
+    color: [colorPrimary, colorBlue],
+    legend: {
+      top: 2,
+      right: 0,
+      icon: "circle",
+      itemWidth: 8,
+      itemHeight: 8,
+      textStyle: { ...baseText, color: colorMuted },
+      itemGap: 18,
+    },
+    grid: { top: 42, left: isCompact ? 8 : 12, right: isCompact ? 8 : 14, bottom: 4, containLabel: true },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "line", lineStyle: { color: alpha(colorPrimary, 0.45), width: 1 } },
+      backgroundColor: colorSurface,
+      borderColor: colorBorder,
+      borderWidth: 1,
+      padding: [10, 14],
+      textStyle: { color: colorText, fontFamily: fontBody, fontSize: 12 },
+      extraCssText: "border-radius:12px;box-shadow:0 8px 24px -8px rgba(0,0,0,.5);backdrop-filter:blur(6px);",
+      formatter: (params) => {
+        const week = activityData[params[0].dataIndex]?.date || params[0].axisValue;
+        const dot = c => `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${c};margin-right:6px"></span>`;
+        let html = `<div style="font-weight:600;color:${colorText};margin-bottom:6px">${week}</div>`;
+        for (const p of params) {
+          const v = p.seriesName === "Strength" ? `${Number(p.value).toLocaleString("en")} kg` : `${Number(p.value).toLocaleString("en")} load`;
+          html += `<div style="color:${colorMuted};margin:2px 0">${dot(p.color)}${p.seriesName}&nbsp;<b style="color:${colorText};float:right;margin-left:12px">${v}</b></div>`;
+        }
+        return html;
+      },
+    },
+    xAxis: {
+      type: "category",
+      data: weeks,
+      boundaryGap: false,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { ...baseText, interval: isCompact ? "auto" : Math.max(Math.floor(weeks.length / (isCompact ? 4 : 12)), 0) },
+      axisPointer: { show: true, lineStyle: { color: alpha(colorPrimary, 0.35) } },
+    },
+    yAxis: [
+      {
+        type: "value",
+        name: isCompact ? "" : "Strength (kg)",
+        nameTextStyle: { color: colorMuted, fontSize: 11, fontFamily: fontBody, padding: [0, 0, 6, 0] },
+        axisLabel: { ...baseText, formatter: v => Intl.NumberFormat("en", { notation: "compact" }).format(v) },
+        splitLine: { lineStyle: { color: colorDivider, type: [4, 6] } },
+      },
+      {
+        type: "value",
+        name: isCompact ? "" : "Cardio load",
+        nameTextStyle: { color: colorMuted, fontSize: 11, fontFamily: fontBody, padding: [0, 0, 6, 0] },
+        axisLabel: { ...baseText, formatter: v => Intl.NumberFormat("en", { notation: "compact" }).format(v) },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: "Strength",
+        type: "line",
+        smooth: 0.4,
+        data: strength,
+        yAxisIndex: 0,
+        showSymbol: false,
+        symbol: "circle",
+        symbolSize: 8,
+        lineStyle: { width: 2.5, color: colorPrimary, shadowColor: alpha(colorPrimary, 0.55), shadowBlur: 14, shadowOffsetY: 2 },
+        emphasis: { focus: "series", scale: 1.4 },
+        areaStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: alpha(colorPrimary, 0.28) },
+            { offset: 0.7, color: alpha(colorPrimary, 0.04) },
+            { offset: 1, color: alpha(colorPrimary, 0) },
+          ]),
+        },
+      },
+      {
+        name: "Cardio",
+        type: "line",
+        smooth: 0.4,
+        data: cardio,
+        yAxisIndex: 1,
+        showSymbol: false,
+        symbol: "circle",
+        symbolSize: 7,
+        lineStyle: { width: 2, color: colorBlue, type: "dashed" },
+        emphasis: { focus: "series", scale: 1.4 },
+      },
+    ],
+  });
+
+  // Redraw on container resize (htmx swaps change container size)
+  const ro = new ResizeObserver(() => chart && !chart.isDisposed() && chart.resize());
+  ro.observe(el);
+})();
+</script>
+{% endif %}

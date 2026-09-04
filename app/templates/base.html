@@ -15,9 +15,11 @@
   <meta name="theme-color" content="#0b0d12" />
   <link rel="mask-icon" href="/static/favicon.svg" color="#e94560" />
   {% block styles %}{% endblock %}
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
 </head>
 
-<body>
+<body hx-boost="true" hx-target="#app-shell" hx-swap="outerHTML" hx-indicator="#boost-indicator">
+  <div id="boost-indicator" class="boost-indicator" aria-hidden="true"></div>
   <script>
     // Delegated delete-confirm: forms with data-confirm="…" ask before
     // submitting. Kept out of inline onclick so dynamic values can't be
@@ -29,17 +31,15 @@
       }
     });
 
-    document.addEventListener('DOMContentLoaded', () => {
-      // Only suppress Enter on multi-row logging forms (marked with
-      // data-suppress-enter); every other form (login, name fields, …)
-      // must keep Enter-to-submit working.
-      document.querySelectorAll('form[data-suppress-enter]').forEach(form => {
-        form.addEventListener('keydown', e => {
-          if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
-            e.preventDefault();
-          }
-        });
-      });
+    // Delegated Enter-suppression for multi-row logging forms (marked
+    // with data-suppress-enter); every other form (login, name fields, …)
+    // keeps Enter-to-submit. Delegation (not per-form binding on
+    // DOMContentLoaded) so it also covers forms swapped in by htmx —
+    // DOMContentLoaded has already fired by then.
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || e.target.tagName === 'BUTTON') return;
+      const form = e.target.closest('form[data-suppress-enter]');
+      if (form) e.preventDefault();
     });
   </script>
 
@@ -59,109 +59,15 @@
   </header>
   <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
-  <!-- Sidebar -->
-  <nav class="sidebar" id="sidebar" aria-label="Main navigation">
-    {% set path = request.url.path %}
-    <a href="/" class="nav-link {% if path == '/' %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="3" y="3" width="7" height="7" />
-        <rect x="14" y="3" width="7" height="7" />
-        <rect x="14" y="14" width="7" height="7" />
-        <rect x="3" y="14" width="7" height="7" />
-      </svg>
-      Dashboard
-    </a>
-    <a href="/exercises" class="nav-link {% if path.startswith('/exercises') %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="8" r="4" />
-        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
-      </svg>
-      Exercises
-    </a>
-    <a href="/templates" class="nav-link {% if path.startswith('/templates') %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" />
-        <rect x="9" y="3" width="6" height="4" rx="1" />
-        <path d="M9 12h6M9 16h4" />
-      </svg>
-      Templates
-    </a>
-    <a href="/sessions/new" class="nav-link {% if path == '/sessions/new' %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 8v8M8 12h8" />
-      </svg>
-      Log Session
-    </a>
-    <a href="/sessions" class="nav-link {% if path == '/sessions' %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="3" y="4" width="18" height="18" rx="2" />
-        <path d="M16 2v4M8 2v4M3 10h18" />
-      </svg>
-      Sessions
-    </a>
-    <a href="/cardio" class="nav-link {% if path == '/cardio' %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M13 4l3 3-8 8-3 5 5-3 8-8 3 3" />
-        <path d="M5 20l2-2" />
-      </svg>
-      Cardio
-    </a>
-    <a href="/progression" class="nav-link {% if path.startswith('/progression') %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-      </svg>
-      Progression
-    </a>
+  <!-- Sidebar (fragment: re-rendered by the server on htmx navigation so
+       the active link always reflects the URL) -->
+  <div id="app-shell" class="app-shell">
+    {% include "partials/nav.html" %}
 
-    <div class="nav-section-label">Discover</div>
-    <a href="/browse/exercises" class="nav-link {% if path.startswith('/browse/exercises') %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="11" cy="11" r="8" />
-        <path d="m21 21-4.35-4.35" />
-      </svg>
-      Browse Exercises
-    </a>
-    <a href="/browse/plans" class="nav-link {% if path.startswith('/browse/plans') %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-      </svg>
-      Training Plans
-    </a>
-
-    {% if user %}
-    <div class="nav-section-label" style="margin-top: var(--space-4);">Account</div>
-    <a href="/profile" class="nav-link {% if path.startswith('/profile') %}active{% endif %}">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
-      Profile
-    </a>
-    <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">
-      <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
-      </svg>
-      <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-      </svg>
-      <span>Theme</span>
-    </button>
-    <div class="sidebar-user">
-      <span class="sidebar-username">{{ user.username }}</span>
-      <form method="post" action="/logout" style="display:inline">
-        <button type="submit" class="sidebar-logout">Sign out</button>
-      </form>
-    </div>
-    {% endif %}
-
-  </nav>
-
-  <main class="main" id="main-content">
-    {% block content %}{% endblock %}
-  </main>
+    <main class="main" id="main-content">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
 
   <script>
     (function () {
@@ -174,62 +80,102 @@
       r.setAttribute("data-theme", d);
       // Keep mobile browser chrome in step with the active theme
       const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) meta.setAttribute("content", d === "dark" ? "#0b0d12" : "#f5f6f8");
 
-      // Sidebar toggle: swap theme, persist the choice, update the icon.
-      window.addEventListener("DOMContentLoaded", () => {
+      function paint() {
         const btn = document.getElementById("theme-toggle");
         if (!btn) return;
+        const cur = r.getAttribute("data-theme");
+        btn.setAttribute("aria-label", cur === "dark" ? "Switch to light theme" : "Switch to dark theme");
         const moon = btn.querySelector(".icon-moon");
         const sun = btn.querySelector(".icon-sun");
-        const paint = () => {
-          const cur = r.getAttribute("data-theme");
-          btn.setAttribute("aria-label", cur === "dark" ? "Switch to light theme" : "Switch to dark theme");
-          if (moon) moon.style.display = cur === "dark" ? "" : "none";
-          if (sun) sun.style.display = cur === "dark" ? "none" : "";
-        };
-        paint();
-        btn.addEventListener("click", () => {
+        if (moon) moon.style.display = cur === "dark" ? "" : "none";
+        if (sun) sun.style.display = cur === "dark" ? "none" : "";
+      }
+
+      // ── Theme toggle: delegated on <body> so it survives htmx swaps ──
+      // Guard: the fragment layout (base_shell.html) re-sends these body
+      // scripts inside #app-shell on every boosted swap, and this listener
+      // must be attached exactly once or each click flips the theme N
+      // times (N = swaps since load), leaving it unchanged.
+      if (!window.__trainlocksThemeWired) {
+        window.__trainlocksThemeWired = true;
+        document.body.addEventListener("click", (e) => {
+          const btn = e.target.closest("#theme-toggle");
+          if (!btn) return;
           const next = r.getAttribute("data-theme") === "dark" ? "light" : "dark";
           r.setAttribute("data-theme", next);
           localStorage.setItem("theme", next);
           if (meta) meta.setAttribute("content", next === "dark" ? "#0b0d12" : "#f5f6f8");
           paint();
         });
-      });
+      }
+
+      // Repaint icon state whenever a fresh sidebar lands (exposed for the
+      // htmx afterSettle hook; don't dispatch DOMContentLoaded — it would
+      // re-run every DOMContentLoaded listener in the app).
+      window.__trainlocksRepaintTheme = paint;
+      paint();
     })();
 
     // ── Mobile sidebar toggle ────────────────────────────────────────────
-    (function () {
-      const toggle = document.getElementById('menu-toggle');
-      const sidebar = document.getElementById('sidebar');
-      const overlay = document.getElementById('sidebar-overlay');
+    // Delegated on <body> so it survives htmx swaps: #app-shell (and the
+    // sidebar inside it) is replaced on every boosted navigation, so any
+    // reference captured at load time goes stale.
+    // Guard: the fragment layout (base_shell.html) re-sends these body
+    // scripts inside #app-shell on every boosted swap, and this listener
+    // must be attached exactly once or each click toggles the drawer N
+    // times (N = swaps since load), leaving it unchanged.
+    if (!window.__trainlocksMobileNavWired) {
+      window.__trainlocksMobileNavWired = true;
+      document.body.addEventListener("click", (e) => {
+        // Resolve fresh on every click — never cache these nodes.
+        const toggle = e.target.closest("#menu-toggle");
+        const overlayClicked = e.target.closest("#sidebar-overlay");
+        const sidebar = document.getElementById("sidebar");
+        const overlay = document.getElementById("sidebar-overlay");
+        if (!sidebar || !overlay) return;
 
-      function openMenu() {
-        sidebar.classList.add('open');
-        overlay.classList.add('visible');
-        toggle.setAttribute('aria-expanded', 'true');
-      }
-      function closeMenu() {
-        sidebar.classList.remove('open');
-        overlay.classList.remove('visible');
-        toggle.setAttribute('aria-expanded', 'false');
-      }
-      function toggleMenu() {
-        sidebar.classList.contains('open') ? closeMenu() : openMenu();
-      }
+        const openMenu = () => {
+          sidebar.classList.add("open");
+          overlay.classList.add("visible");
+          (toggle || document.getElementById("menu-toggle"))?.setAttribute("aria-expanded", "true");
+        };
+        const closeMenu = () => {
+          sidebar.classList.remove("open");
+          overlay.classList.remove("visible");
+          (toggle || document.getElementById("menu-toggle"))?.setAttribute("aria-expanded", "false");
+        };
 
-      if (toggle && sidebar && overlay) {
-        toggle.addEventListener('click', toggleMenu);
-        overlay.addEventListener('click', closeMenu);
-        // Close menu when a nav link is tapped
-        sidebar.querySelectorAll('.nav-link').forEach(link => {
-          link.addEventListener('click', closeMenu);
-        });
-      }
-    })();
+        const navLink = e.target.closest(".nav-link");
+        if (toggle) {
+          sidebar.classList.contains("open") ? closeMenu() : openMenu();
+        } else if (overlayClicked) {
+          closeMenu();
+        } else if (navLink && sidebar.contains(navLink)) {
+          // Close menu when a nav link is tapped
+          closeMenu();
+        }
+      });
+    }
   </script>
   {% block scripts %}{% endblock %}
+
+  <script>
+    // ── htmx prototype wiring ──────────────────────────────────────
+    // Morph swaps with the View Transitions API where the browser
+    // supports it; graceful instant swap everywhere else.
+    htmx.config.globalViewTransitions = true;
+
+    // ── KPI spotlight: track the pointer over any kpi card ─────────
+    // Delegated so it works for cards swapped in by htmx too.
+    document.addEventListener('pointermove', (e) => {
+      const card = e.target.closest && e.target.closest('a.kpi-card');
+      if (!card) return;
+      const r = card.getBoundingClientRect();
+      card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+      card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+    }, { passive: true });
+  </script>
 </body>
 
 </html>
