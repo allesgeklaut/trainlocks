@@ -119,34 +119,44 @@
     })();
 
     // ── Mobile sidebar toggle ────────────────────────────────────────────
-    (function () {
-      const toggle = document.getElementById('menu-toggle');
-      const sidebar = document.getElementById('sidebar');
-      const overlay = document.getElementById('sidebar-overlay');
+    // Delegated on <body> so it survives htmx swaps: #app-shell (and the
+    // sidebar inside it) is replaced on every boosted navigation, so any
+    // reference captured at load time goes stale.
+    // Guard: htmx re-executes body scripts on boosted swaps, and this
+    // listener must be attached exactly once or each click toggles the
+    // drawer N times (N = swaps since load), leaving it unchanged.
+    if (!window.__trainlocksMobileNavWired) {
+      window.__trainlocksMobileNavWired = true;
+      document.body.addEventListener("click", (e) => {
+        // Resolve fresh on every click — never cache these nodes.
+        const toggle = e.target.closest("#menu-toggle");
+        const overlayClicked = e.target.closest("#sidebar-overlay");
+        const sidebar = document.getElementById("sidebar");
+        const overlay = document.getElementById("sidebar-overlay");
+        if (!sidebar || !overlay) return;
 
-      function openMenu() {
-        sidebar.classList.add('open');
-        overlay.classList.add('visible');
-        toggle.setAttribute('aria-expanded', 'true');
-      }
-      function closeMenu() {
-        sidebar.classList.remove('open');
-        overlay.classList.remove('visible');
-        toggle.setAttribute('aria-expanded', 'false');
-      }
-      function toggleMenu() {
-        sidebar.classList.contains('open') ? closeMenu() : openMenu();
-      }
+        const openMenu = () => {
+          sidebar.classList.add("open");
+          overlay.classList.add("visible");
+          (toggle || document.getElementById("menu-toggle"))?.setAttribute("aria-expanded", "true");
+        };
+        const closeMenu = () => {
+          sidebar.classList.remove("open");
+          overlay.classList.remove("visible");
+          (toggle || document.getElementById("menu-toggle"))?.setAttribute("aria-expanded", "false");
+        };
 
-      if (toggle && sidebar && overlay) {
-        toggle.addEventListener('click', toggleMenu);
-        overlay.addEventListener('click', closeMenu);
-        // Close menu when a nav link is tapped
-        sidebar.querySelectorAll('.nav-link').forEach(link => {
-          link.addEventListener('click', closeMenu);
-        });
-      }
-    })();
+        const navLink = e.target.closest(".nav-link");
+        if (toggle) {
+          sidebar.classList.contains("open") ? closeMenu() : openMenu();
+        } else if (overlayClicked) {
+          closeMenu();
+        } else if (navLink && sidebar.contains(navLink)) {
+          // Close menu when a nav link is tapped
+          closeMenu();
+        }
+      });
+    }
   </script>
   {% block scripts %}{% endblock %}
 
