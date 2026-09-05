@@ -21,14 +21,16 @@
 <body hx-boost="true" hx-target="#app-shell" hx-swap="outerHTML" hx-indicator="#boost-indicator">
   <div id="boost-indicator" class="boost-indicator" aria-hidden="true"></div>
   <script>
-    // Delegated delete-confirm: forms with data-confirm="…" ask before
-    // submitting. Kept out of inline onclick so dynamic values can't be
-    // interpolated into JS.
-    document.addEventListener('submit', (e) => {
-      const msg = e.target instanceof HTMLFormElement ? e.target.dataset.confirm : null;
-      if (msg && !window.confirm(msg)) {
-        e.preventDefault();
-      }
+    // Delete-confirm guard: htmx fires htmx:confirm before any request is
+    // issued, so cancelling truly aborts. (Submit-time handlers can't —
+    // htmx has already sent the boosted request by the time they run.)
+    document.body.addEventListener('htmx:confirm', (e) => {
+      const elt = e.detail && e.detail.elt instanceof Element ? e.detail.elt : null;
+      const form = elt ? elt.closest('form') : null;
+      const msg = (form && form.dataset.confirm) || (elt && elt.dataset.confirm) || null;
+      if (!msg) return;
+      e.preventDefault();
+      if (window.confirm(msg)) e.detail.issueRequest(true);
     });
 
     // Delegated Enter-suppression for multi-row logging forms (marked
