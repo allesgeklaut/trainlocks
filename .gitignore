@@ -4,3 +4,7 @@
 *.bak
 *.sqlite
 .env
+# playwright artifacts
+.playwright-mcp/
+/coach-streaming-live.png
+/ai-paste-preview.png
