@@ -13,14 +13,21 @@ import re
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.orm import Session
 
 from . import llm as llm_mod
 from . import models
 from .auth import get_current_user, get_db
-from .web import BODYWEIGHT_DEFAULT_KG, _cardio_load_factor, _iso_week_key, render_page
+from .web import (
+    BODYWEIGHT_DEFAULT_KG,
+    CARDIO_ACTIVITY_TYPES,
+    _cardio_load_factor,
+    _iso_week_key,
+    _parse_duration_min,
+    render_page,
+)
 
 logger = logging.getLogger("trainlocks.ai")
 
@@ -239,23 +246,36 @@ async def llm_select(request: Request, user: models.User = Depends(get_current_u
 # AI session extraction (screenshot -> workout session)
 # ---------------------------------------------------------------------------
 
-EXTRACTION_SYSTEM_PROMPT = """You read workout screenshots (gym app logs, \
-notes app workouts, whiteboard photos) and extract the training session as \
-strict JSON. Respond with JSON only — no prose, no markdown fences. Schema:
+def _extraction_system_prompt() -> str:
+    """Extraction prompt; includes today's date so partial dates in the
+    screenshot ("Wed 2. Sep") can be resolved to a full ISO date."""
+    today = date.today()
+    weekday = today.strftime("%A")
+    return f"""You read workout screenshots (gym app logs, notes app workouts, \
+whiteboard photos, watch/fitness-app summaries) and extract the training \
+session as strict JSON. Respond with JSON only — no prose, no markdown \
+fences. Schema:
 
-{"date": "YYYY-MM-DD or null",
- "exercises": [{"name": "exercise name",
-                "sets": [{"reps": <int>, "weight_kg": <number or null>}]}],
- "cardio": [{"activity_type": "running|swimming|cycling|walking|rowing|other",
+{{"date": "YYYY-MM-DD or null",
+ "exercises": [{{"name": "exercise name",
+                "sets": [{{"reps": <int>, "weight_kg": <number or null>}}]}}],
+ "cardio": [{{"activity_type": "running|swimming|cycling|walking|rowing|other",
              "distance_km": <number or null>, "duration_min": <number or null>,
-             "notes": "string or null"}],
- "notes": "session notes or null"}
+             "notes": "string or null"}}],
+ "notes": "session notes or null"}}
 
 Rules:
+- Today is {today.isoformat()} ({weekday}). If the screenshot shows a date or \
+partial date (e.g. "Wed 2. Sep", "Sep 2", "yesterday"), resolve it to the \
+most recent matching date in the past and output full YYYY-MM-DD. Only use \
+null when no date information at all is visible.
 - reps are integers; weight_kg is in kilograms (convert lb: /2.2046, round to 0.5).
 - For bodyweight exercises set weight_kg to null.
-- Drop empty/zero rows; keep the exercise order from the screenshot.
-- If the date is visible use it, else null."""
+- Cardio: duration_min is the workout time in minutes (convert H:MM:SS or \
+MM:SS, e.g. 0:43:34 -> 43.57). Put extra metrics (pace, heart rate, \
+elevation, calories, cadence, power, location, start time) into the cardio \
+notes so they are preserved.
+- Drop empty/zero rows; keep the exercise order from the screenshot."""
 
 
 def _parse_json_loose(text: str) -> dict:
@@ -349,7 +369,7 @@ async def ai_session_extract(
 
     try:
         reply = await llm_mod.chat([
-            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+            {"role": "system", "content": _extraction_system_prompt()},
             {"role": "user",
              "content": "Extract the workout session from this screenshot as JSON.",
              "images": [b64]},
@@ -424,12 +444,133 @@ async def ai_session_extract(
     except ValueError:
         parsed_date = date.today()
 
+    # Normalize cardio entries for the review form (validate numerics so the
+    # template can post them straight to the cardio flow on save).
+    review_cardio = []
+    for c in data.get("cardio") or []:
+        try:
+            dist = float(c.get("distance_km")) if c.get("distance_km") is not None else None
+        except (TypeError, ValueError):
+            dist = None
+        try:
+            dur = float(c.get("duration_min")) if c.get("duration_min") is not None else None
+        except (TypeError, ValueError):
+            dur = None
+        if dist is None and dur is None:
+            continue
+        atype = str(c.get("activity_type") or "other").strip().lower()
+        if atype not in CARDIO_ACTIVITY_TYPES:
+            atype = "other"
+        review_cardio.append({
+            "activity_type": atype,
+            "distance_km": dist,
+            "duration_min": dur,
+            "notes": str(c.get("notes") or ""),
+        })
+
     return render_page(request, "ai_session_review.html", {
         "user": user,
         "review_exercises": review_exercises,
         "created_names": created,
         "ai_date": parsed_date,
         "ai_notes": data.get("notes") or "",
-        "ai_cardio": data.get("cardio") or [],
+        "ai_cardio": review_cardio,
         "model_label": await llm_mod.current_model_label(),
     })
+
+
+@router.post("/sessions/ai/save")
+async def ai_session_save(
+    request: Request,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Save the reviewed AI session: creates the WorkoutSession with sets and
+    any checked cardio activities (in one transaction), then redirects to the
+    session list."""
+    form = await request.form()
+    date_str = form.get("date")
+    if not date_str:
+        raise HTTPException(status_code=400, detail="Date required")
+    try:
+        workout_date = date.fromisoformat(str(date_str))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date")
+
+    workout = models.WorkoutSession(
+        date=workout_date,
+        notes=form.get("notes") or None,
+    )
+    db.add(workout)
+    db.flush()
+
+    # Sets — same reps-<ex_id>-<set> fields POST /sessions/new accepts.
+    for key, value in form.items():
+        if not key.startswith("reps-"):
+            continue
+        try:
+            _, ex_id_str, set_num_str = key.split("-")
+            ex_id = int(ex_id_str)
+            set_num = int(set_num_str)
+        except (ValueError, IndexError):
+            continue
+        weight_val = form.get(f"weight-{ex_id}-{set_num}")
+        try:
+            reps = int(value) if value else 0
+        except ValueError:
+            reps = 0
+        try:
+            weight = float(weight_val) if weight_val else None
+        except ValueError:
+            weight = None
+        if reps == 0 and weight is None:
+            continue
+        db.add(models.SetEntry(
+            session_id=workout.id,
+            exercise_id=ex_id,
+            set_number=set_num,
+            reps=reps,
+            weight=weight,
+        ))
+
+    # Cardio entries checked in the review form.
+    cardio_saved = 0
+    idx = 0
+    while f"cardio-{idx}-include" in form:
+        if form.get(f"cardio-{idx}-include") == "1":
+            activity_type = (form.get(f"cardio-{idx}-type") or "other").strip().lower()
+            if activity_type not in CARDIO_ACTIVITY_TYPES:
+                activity_type = "other"
+
+            def _to_float(v):
+                try:
+                    return float(v) if v not in (None, "") else None
+                except (TypeError, ValueError):
+                    return None
+
+            distance_km = _to_float(form.get(f"cardio-{idx}-distance"))
+            try:
+                duration_min = _parse_duration_min(form.get(f"cardio-{idx}-duration"))
+            except ValueError:
+                duration_min = None
+            if distance_km is not None and distance_km < 0:
+                distance_km = None
+            if duration_min is not None and duration_min < 0:
+                duration_min = None
+            if distance_km is not None or duration_min is not None:
+                db.add(models.CardioActivity(
+                    session_id=workout.id,
+                    activity_type=activity_type,
+                    distance_km=distance_km,
+                    duration_min=duration_min,
+                    notes=form.get(f"cardio-{idx}-notes") or None,
+                ))
+                cardio_saved += 1
+        idx += 1
+
+    db.commit()
+    # Preserve AI provenance in the flash-less flow: redirect with a flag.
+    return RedirectResponse(
+        url=f"/sessions/{workout.id}?ai_saved=1&cardio={cardio_saved}",
+        status_code=303,
+    )

@@ -1,6 +1,7 @@
 {
   "selected": "ollama",
   "models": {
-    "ollama": "glm-5.3-flash:cloud"
+    "ollama": "glm-5.3-flash:cloud",
+    "llama-server": "qwen3.8-27b"
   }
 }

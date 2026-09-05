@@ -53,6 +53,34 @@ def _cardio_load_factor(activity_type: str) -> float:
     return CARDIO_LOAD_FACTOR.get((activity_type or "").lower(), CARDIO_LOAD_DEFAULT_FACTOR)
 
 
+def _parse_duration_min(value) -> float | None:
+    """Parse a form duration: minutes ('45', '44.85') or M:SS / H:MM:SS ('44:51').
+
+    Raises ValueError for non-empty values that don't match.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    value = value.strip()
+    if not value:
+        return None
+    parts = value.split(":")
+    if len(parts) in (2, 3) and all(p.strip().isdigit() for p in parts):
+        nums = [int(p) for p in parts]
+        if len(nums) == 2:
+            h, m, s = 0, nums[0], nums[1]
+        else:
+            h, m, s = nums
+        if not (0 <= m < 60 and 0 <= s < 60):
+            raise ValueError("invalid duration")
+        return h * 60 + m + s / 60
+    try:
+        return float(value)
+    except ValueError:
+        raise ValueError("invalid duration")
+
+
 def _iso_week_key(d: date) -> str:
     """Canonical chart bucket key for a date, e.g. '2026-W36' (ISO, Monday-aligned)."""
     iso = d.isocalendar()
