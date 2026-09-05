@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Date, Float
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Date, Float, Text, DateTime
 from sqlalchemy.orm import relationship
+from datetime import datetime
 from .database import Base
 
 
@@ -73,3 +74,18 @@ class User(Base):
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     bodyweight = Column(Float, nullable=True)
+
+
+class CoachChatMessage(Base):
+    """Persistent conversation history for the fitness-coach chat.
+
+    Stored so the active chat session survives page reloads and the LLM can
+    be fed the full prior context on every turn.
+    """
+
+    __tablename__ = "coach_chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    role = Column(String(16), nullable=False)  # user | assistant
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)

@@ -14,6 +14,12 @@ services:
       - /opt/secrets/trainlocks.env
     environment:
       - DATABASE_URL=sqlite:////data/training_log.db
+      # Multi-backend LLM config, e.g.:
+      # LLM_BACKENDS=[{"name":"ollama","type":"ollama","url":"http://host.docker.internal:11434","model":"llava:13b"}]
+      - LLM_BACKENDS=${LLM_BACKENDS:-}
+      - LLM_STATE_FILE=/data/llm_state.json
+      - LLM_REASONING_EFFORT=${LLM_REASONING_EFFORT:-}
+      - LITELLM_API_KEY=${LITELLM_API_KEY:-}
     networks:
       - default
       - stacks-shared
