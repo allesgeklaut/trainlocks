@@ -209,6 +209,8 @@ class TestCoachChat:
         db.flush()
         db.add(models.SetEntry(session_id=sess.id, exercise_id=ex.id,
                                set_number=1, reps=5, weight=100.0))
+        db.add(models.CardioActivity(session_id=sess.id, activity_type="running",
+                                     distance_km=6.39, duration_min=43.57))
         db.commit()
 
         client.post("/coach/send/stream", json={"message": "review my squat"})
@@ -216,6 +218,9 @@ class TestCoachChat:
         assert "Squat" in system and "100.0kg x 5" in system
         assert "Weekly training load" in system
         assert "Today's date" in system
+        # Durations keep real precision (43.57 min -> 43:34), no rounding to 44min.
+        assert "running 6.39km 43:34min" in system
+        assert "44min" not in system
 
 
 # ---------------------------------------------------------------------------

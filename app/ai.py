@@ -64,6 +64,16 @@ def _coach_history(db: Session, limit: int = COACH_HISTORY_LIMIT) -> list[dict]:
     return [{"role": r.role, "content": r.content} for r in reversed(rows)]
 
 
+def _fmt_duration_min(minutes: float) -> str:
+    """Format decimal minutes as M:SS (e.g. 43.57 -> '43:34')."""
+    total = round(minutes * 60)
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}:{m:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
+
 def _training_context(user: models.User, db: Session) -> str:
     """Deterministic training-data context for the coach system prompt."""
     now = datetime.now()
@@ -91,7 +101,7 @@ def _training_context(user: models.User, db: Session) -> str:
                 if c.distance_km:
                     bits.append(f"{c.distance_km}km")
                 if c.duration_min:
-                    bits.append(f"{round(c.duration_min)}min")
+                    bits.append(f"{_fmt_duration_min(c.duration_min)}min")
                 parts.append(" ".join(bits))
             line_txt = "; ".join(parts) if parts else "(no sets recorded)"
             notes = f" — {s.notes}" if s.notes else ""
