@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Date, Float, Text, DateTime
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from .database import Base
 
 
@@ -88,4 +88,6 @@ class CoachChatMessage(Base):
     id = Column(Integer, primary_key=True, index=True)
     role = Column(String(16), nullable=False)  # user | assistant
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    # Timezone-aware UTC; stored naive in SQLite for consistency with the
+    # rest of the schema (ordering is only ever compared within this column).
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), index=True)

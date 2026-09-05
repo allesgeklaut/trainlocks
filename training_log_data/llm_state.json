@@ -1,6 +1,6 @@
 {
   "selected": "ollama",
   "models": {
-    "ollama": "nemotron-3-super:cloud"
+    "ollama": "glm-5.3-flash:cloud"
   }
 }
