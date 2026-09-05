@@ -189,7 +189,9 @@
 
   <div class="chat-hint-error" id="chat-error" hidden></div>
 
-  <form class="chat-inputbar" id="chat-form">
+  <!-- hx-boost="false": body-level boost would hijack this form's submit and
+       swap the page mid-stream, killing the SSE fetch and wiping the chat. -->
+  <form class="chat-inputbar" id="chat-form" hx-boost="false">
     <textarea id="chat-input" rows="1" placeholder="Message your coach… (Enter to send, Shift+Enter for newline)"></textarea>
     <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
     <button type="button" class="btn btn-stop" id="chat-stop" hidden title="Stop generating" aria-label="Stop generating">
