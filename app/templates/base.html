@@ -109,6 +109,11 @@
           localStorage.setItem("theme", next);
           if (meta) meta.setAttribute("content", next === "dark" ? "#0b0d12" : "#f5f6f8");
           paint();
+          // Canvas charts (ECharts) can't follow CSS variables — they keep
+          // whatever colors they were drawn with. Tell them to re-apply
+          // their options so the toggle doesn't leave stale light-theme
+          // (or dark-theme) pixels on screen.
+          window.dispatchEvent(new CustomEvent("trainlocks:themechange"));
         });
       }
 

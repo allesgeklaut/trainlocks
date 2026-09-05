@@ -31,37 +31,38 @@
 // works on full page loads, leaving "echarts is not defined" after
 // every boosted navigation.
 (function() {
-  function render() {
-    const activityData = {{ weekly_activity | tojson }};
-    if (activityData.length === 0) return;
-
-  const style = getComputedStyle(document.documentElement);
-  const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
-  const colorPrimary  = style.getPropertyValue("--color-primary").trim();
-  const colorBlue     = style.getPropertyValue("--color-blue").trim();
-  const colorDivider  = style.getPropertyValue("--color-divider").trim();
-  const colorSurface  = style.getPropertyValue("--color-surface").trim();
-  const colorBorder   = style.getPropertyValue("--color-border").trim();
-  const colorText     = style.getPropertyValue("--color-text").trim();
-  const fontBody      = style.getPropertyValue("--font-body").trim();
+  const activityData = {{ weekly_activity | tojson }};
+  if (activityData.length === 0) return;
 
   const el = document.getElementById("activityChart");
-  const isCompact = window.matchMedia("(max-width: 768px)").matches;
+  let chart = null;
 
-  const chart = echarts.init(el, null, { renderer: "canvas" });
+  // Built from CSS variables on each call so the chart can be re-themed
+  // after a data-theme toggle without a page reload.
+  function buildOption() {
+    const style = getComputedStyle(document.documentElement);
+    const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
+    const colorPrimary  = style.getPropertyValue("--color-primary").trim();
+    const colorBlue     = style.getPropertyValue("--color-blue").trim();
+    const colorDivider  = style.getPropertyValue("--color-divider").trim();
+    const colorSurface  = style.getPropertyValue("--color-surface").trim();
+    const colorBorder   = style.getPropertyValue("--color-border").trim();
+    const colorText     = style.getPropertyValue("--color-text").trim();
+    const fontBody      = style.getPropertyValue("--font-body").trim();
 
-  const weeks = activityData.map(d => d.date.replace(/^\d{4}-W/, "W"));
-  const strength = activityData.map(d => d.load);
-  const cardio = activityData.map(d => d.cardio_load);
+    const isCompact = window.matchMedia("(max-width: 768px)").matches;
 
-  function alpha(hex, a) {
-    const n = parseInt(hex.slice(1), 16);
-    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-  }
+    function alpha(hex, a) {
+      const n = parseInt(hex.slice(1), 16);
+      return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+    }
 
-  const baseText = { color: colorMuted, fontFamily: fontBody, fontSize: isCompact ? 10 : 12 };
+    const baseText = { color: colorMuted, fontFamily: fontBody, fontSize: isCompact ? 10 : 12 };
+    const weeks = activityData.map(d => d.date.replace(/^\d{4}-W/, "W"));
+    const strength = activityData.map(d => d.load);
+    const cardio = activityData.map(d => d.cardio_load);
 
-  chart.setOption({
+    return {
     animationDuration: 900,
     animationEasing: "cubicOut",
     textStyle: { fontFamily: fontBody },
@@ -154,12 +155,25 @@
         emphasis: { focus: "series", scale: 1.4 },
       },
     ],
-  });
-
-  // Redraw on container resize (htmx swaps change container size)
-  const ro = new ResizeObserver(() => chart && !chart.isDisposed() && chart.resize());
-  ro.observe(el);
+    };
   }
+
+  function render() {
+    chart = echarts.init(el, null, { renderer: "canvas" });
+    chart.setOption(buildOption());
+
+    // Redraw on container resize (htmx swaps change container size)
+    const ro = new ResizeObserver(() => chart && !chart.isDisposed() && chart.resize());
+    ro.observe(el);
+  }
+
+  // The theme toggle only flips data-theme on <html>; the canvas keeps the
+  // colors it was drawn with. Re-apply the option so the chart follows.
+  // (el.isConnected: older partial instances from htmx swaps hold orphaned
+  // charts on detached nodes.)
+  window.addEventListener("trainlocks:themechange", () => {
+    if (el.isConnected && chart && !chart.isDisposed()) chart.setOption(buildOption());
+  });
 
   // Already available (full page load, or cached from a previous visit)?
   // Otherwise inject the CDN script and render once it lands.

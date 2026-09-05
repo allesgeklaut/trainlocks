@@ -41,5 +41,9 @@
     <button type="submit" class="btn btn-primary">Save Changes</button>
     <a href="/cardio" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
   </form>
+  <form method="post" action="/cardio/{{ activity.id }}/delete" style="display:inline; margin-top:var(--space-3); margin-left:var(--space-3);"
+    data-confirm="Delete this {{ activity.activity_type }} activity?">
+    <button type="submit" class="btn btn-danger">Delete</button>
+  </form>
 </div>
 {% endblock %}
