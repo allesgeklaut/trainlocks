@@ -17,7 +17,7 @@
 </div>
 {% endif %}
 
-<form method="post" action="/sessions/new" data-suppress-enter hx-boost="false" style="max-width:560px">
+<form method="post" action="/sessions/ai/save" data-suppress-enter hx-boost="false" style="max-width:560px">
   <input type="hidden" name="template_id" value="" />
 
   <div class="card">
@@ -66,26 +66,45 @@
   <div class="card">
     <div class="card-title">AI-detected cardio</div>
     <p style="font-size:var(--text-sm);color:var(--color-text-muted)">
-      {% if not review_exercises %}
-      This screenshot contains a cardio-only session. After saving, log it on the
-      <a href="/cardio">Cardio</a> page — or use the values below:
-      {% else %}
-      The screenshot also mentioned cardio. Log it after saving via
-      <a href="/cardio">Cardio</a>:
-      {% endif %}
+      Saved together with the session. Uncheck what you don't want.
     </p>
-    <ul style="font-size:var(--text-sm);margin:0;padding-left:var(--space-5)">
-      {% for c in ai_cardio %}
-      <li>{{ c.activity_type or 'activity' }}{% if c.distance_km %} — {{ c.distance_km }} km{% endif %}{% if c.duration_min %} — {{ c.duration_min }} min{% endif %}</li>
-      {% endfor %}
-    </ul>
+    {% for c in ai_cardio %}
+    <div class="ai-cardio-entry">
+      <label class="ai-cardio-check">
+        <input type="checkbox" name="cardio-{{ loop.index0 }}-include" value="1" checked />
+        <strong>{{ c.activity_type }}</strong>
+      </label>
+      <div class="ai-cardio-fields">
+        <label>
+          <span>Type</span>
+          <select name="cardio-{{ loop.index0 }}-type">
+            {% for t in ('running','swimming','cycling','walking','rowing','other') %}
+            <option value="{{ t }}" {% if t == c.activity_type %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Distance (km)</span>
+          <input type="number" step="0.01" min="0" name="cardio-{{ loop.index0 }}-distance" value="{{ c.distance_km if c.distance_km is not none else '' }}" placeholder="—" />
+        </label>
+        <label>
+          <span>Duration (min or H:MM:SS)</span>
+          <input type="text" name="cardio-{{ loop.index0 }}-duration" value="{{ '%g'|format(c.duration_min) if c.duration_min is not none else '' }}" placeholder="—" />
+        </label>
+      </div>
+      {% if c.notes %}
+      <input type="hidden" name="cardio-{{ loop.index0 }}-notes" value="{{ c.notes }}" />
+      <p class="ai-cardio-notes">{{ c.notes }}</p>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
   {% elif not review_exercises %}
   <div class="card">
     <div class="card-title">Nothing to log</div>
     <p style="font-size:var(--text-sm);color:var(--color-text-muted)">
-      The AI didn't find any exercises in this screenshot. You can still save the
-      notes, adjust the date, or try a different/vision model.
+      The AI didn't find any exercises or cardio in this screenshot. You can still
+      save the notes, adjust the date, or try a different/vision model.
     </p>
   </div>
   {% endif %}
@@ -172,6 +191,45 @@
   .badge-new {
     background: color-mix(in srgb, var(--color-warning) 18%, transparent);
     color: var(--color-warning);
+  }
+
+  .ai-cardio-entry {
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+
+  .ai-cardio-check {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    font-size: var(--text-sm);
+  }
+
+  .ai-cardio-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+
+  .ai-cardio-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .ai-cardio-fields label:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .ai-cardio-notes {
+    margin: var(--space-2) 0 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-faint);
   }
 </style>
 {% endblock %}

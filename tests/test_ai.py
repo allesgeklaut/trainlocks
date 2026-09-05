@@ -3,6 +3,7 @@ screenshot-to-session extraction. All LLM calls are mocked — no network."""
 
 import base64
 import json
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ from fastapi.testclient import TestClient
 from app import llm as llm_mod
 from app import models
 from app.ai import (
-    EXTRACTION_SYSTEM_PROMPT,
+    _extraction_system_prompt,
     _match_or_create_exercises,
     _norm_name,
     _parse_json_loose,
@@ -421,3 +422,64 @@ class TestExtractionErrors:
     def test_llm_backend_error_is_importable_and_raised(self, llm_state):
         from app.llm import LLMBackendError
         assert issubclass(LLMBackendError, RuntimeError)
+
+
+class TestAiSessionSave:
+    def test_save_session_with_cardio(self, client, llm_state):
+        """The review form's save route creates session + sets + cardio in one go."""
+        db = SessionLocal()
+        ex = models.Exercise(name="SaveTest Lift", is_bodyweight=False)
+        db.add(ex)
+        db.commit()
+        r = client.post("/sessions/ai/save", data={
+            "date": "2026-09-02",
+            "notes": "AI saved session",
+            f"reps-{ex.id}-1": "10", f"weight-{ex.id}-1": "50",
+            "cardio-0-include": "1",
+            "cardio-0-type": "running",
+            "cardio-0-distance": "6.39",
+            "cardio-0-duration": "43:34",
+            "cardio-0-notes": "Avg pace 6'49\"/km, Graz",
+            # second entry unchecked -> skipped
+            "cardio-1-include": "0",
+            "cardio-1-type": "cycling",
+            "cardio-1-distance": "20",
+            "cardio-1-duration": "60",
+        }, follow_redirects=False)
+        assert r.status_code == 303
+        assert "/sessions/" in r.headers["location"] and "cardio=1" in r.headers["location"]
+
+        sess = db.query(models.WorkoutSession).filter_by(notes="AI saved session").first()
+        assert sess is not None
+        assert sess.date.isoformat() == "2026-09-02"
+        assert sess.sets[0].weight == 50.0
+        assert len(sess.cardio) == 1
+        c = sess.cardio[0]
+        assert c.activity_type == "running"
+        assert c.distance_km == 6.39
+        assert abs(c.duration_min - 43.566666) < 0.01  # 43:34 parsed
+        assert "Graz" in (c.notes or "")
+
+    def test_save_session_cardio_only(self, client, llm_state):
+        """A cardio-only screenshot saves fine with no sets."""
+        r = client.post("/sessions/ai/save", data={
+            "date": "2026-09-03",
+            "notes": "",
+            "cardio-0-include": "1",
+            "cardio-0-type": "swimming",
+            "cardio-0-distance": "2.0",
+            "cardio-0-duration": "45",
+            "cardio-0-notes": "",
+        }, follow_redirects=False)
+        assert r.status_code == 303
+        db = SessionLocal()
+        sess = db.query(models.WorkoutSession).filter_by(date=date(2026, 9, 3)).first()
+        assert sess is not None
+        assert len(sess.cardio) == 1
+        assert sess.cardio[0].activity_type == "swimming"
+
+    def test_extraction_prompt_includes_today(self, client, llm_state):
+        """The extraction prompt embeds today's date so partial dates resolve."""
+        prompt = _extraction_system_prompt()
+        assert "Today is" in prompt
+        assert date.today().isoformat() in prompt

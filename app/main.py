@@ -58,6 +58,7 @@ from .web import (
     _cardio_pace,
     _cardio_pace_unit,
     _iso_week_key,
+    _parse_duration_min,
     render_page,
     templates,
 )
@@ -137,33 +138,7 @@ def _cardio_pace_display(c) -> str:
 
 templates.env.globals["_cardio_pace_display"] = _cardio_pace_display
 
-
-def _parse_duration_min(value) -> float | None:
-    """Parse a form duration: minutes ('45', '44.85') or M:SS / H:MM:SS ('44:51').
-
-    Raises ValueError for non-empty values that don't match.
-    """
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    value = value.strip()
-    if not value:
-        return None
-    parts = value.split(":")
-    if len(parts) in (2, 3) and all(p.strip().isdigit() for p in parts):
-        nums = [int(p) for p in parts]
-        if len(nums) == 2:
-            h, m, s = 0, nums[0], nums[1]
-        else:
-            h, m, s = nums
-        if not (0 <= m < 60 and 0 <= s < 60):
-            raise ValueError("invalid duration")
-        return h * 60 + m + s / 60
-    try:
-        return float(value)
-    except ValueError:
-        raise ValueError("invalid duration")
+# _parse_duration_min lives in web.py (shared with the AI router).
 
 
 def _cardio_duration_display(c) -> str:
