@@ -135,6 +135,12 @@
     animation: chat-pulse 1.2s ease-in-out infinite;
   }
 
+  /* Only show the ::after dots when there's no explicit thinking indicator
+     inside (otherwise the dots would appear twice). */
+  .chat-msg.pending:has(.chat-thinking)::after {
+    content: none;
+  }
+
   .chat-thinking {
     display: inline-flex;
     align-items: center;
