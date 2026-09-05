@@ -66,14 +66,27 @@
   <div class="card">
     <div class="card-title">AI-detected cardio</div>
     <p style="font-size:var(--text-sm);color:var(--color-text-muted)">
+      {% if not review_exercises %}
+      This screenshot contains a cardio-only session. After saving, log it on the
+      <a href="/cardio">Cardio</a> page — or use the values below:
+      {% else %}
       The screenshot also mentioned cardio. Log it after saving via
       <a href="/cardio">Cardio</a>:
+      {% endif %}
     </p>
     <ul style="font-size:var(--text-sm);margin:0;padding-left:var(--space-5)">
       {% for c in ai_cardio %}
       <li>{{ c.activity_type or 'activity' }}{% if c.distance_km %} — {{ c.distance_km }} km{% endif %}{% if c.duration_min %} — {{ c.duration_min }} min{% endif %}</li>
       {% endfor %}
     </ul>
+  </div>
+  {% elif not review_exercises %}
+  <div class="card">
+    <div class="card-title">Nothing to log</div>
+    <p style="font-size:var(--text-sm);color:var(--color-text-muted)">
+      The AI didn't find any exercises in this screenshot. You can still save the
+      notes, adjust the date, or try a different/vision model.
+    </p>
   </div>
   {% endif %}
 
