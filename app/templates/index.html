@@ -50,7 +50,7 @@
   {% if recent_sessions %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Date</th><th>Template</th><th>Notes</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>Template</th><th>Notes</th></tr></thead>
       <tbody>
         {% for sess in recent_sessions %}
         <tr style="cursor: pointer;" onclick="window.location.href='/sessions/{{ sess.id }}'">
@@ -76,9 +76,6 @@
             </div>
             {% endif %}
             {% endfor %}
-          </td>
-          <td class="actions" onclick="event.stopPropagation();">
-            <a href="/sessions/{{ sess.id }}" class="btn-icon" title="View"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></a>
           </td>
         </tr>
         {% endfor %}

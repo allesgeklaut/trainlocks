@@ -844,6 +844,10 @@ table tbody tr:hover {
   background: oklch(from var(--color-text) l c h / 0.03);
 }
 
+table tbody tr[onclick] {
+  cursor: pointer;
+}
+
 /* ── Badges ────────────────────────────────────────────────────────────── */
 .badge {
   display: inline-flex;
