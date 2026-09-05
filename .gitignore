@@ -4,6 +4,8 @@
 *.bak
 *.sqlite
 .env
+# Runtime state: active LLM backend/model selection (bind-mounted volume)
+training_log_data/llm_state.json
 # playwright artifacts
 .playwright-mcp/
 /coach-streaming-live.png
