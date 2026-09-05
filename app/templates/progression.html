@@ -2,6 +2,7 @@
 {% block title %}Progression — Training Log{% endblock %}
 {% block content %}
 <div class="page-header">
+  <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/progression<span class="caret" aria-hidden="true"></span></button>
   <h1 class="page-title">Progression</h1>
   <p class="page-subtitle">Track how your lifts develop over time</p>
 </div>
@@ -153,16 +154,6 @@
   const res = await fetch(`/api/progression/${exerciseId}`);
   const { data } = await res.json();
 
-  const style = getComputedStyle(document.documentElement);
-  const colorText     = style.getPropertyValue("--color-text").trim();
-  const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
-  const colorPrimary  = style.getPropertyValue("--color-primary").trim();
-  const colorBlue     = style.getPropertyValue("--color-blue").trim();
-  const colorDivider  = style.getPropertyValue("--color-divider").trim();
-  const colorSurface  = style.getPropertyValue("--color-surface").trim();
-  const colorBorder   = style.getPropertyValue("--color-border").trim();
-  const fontBody      = style.getPropertyValue("--font-body").trim();
-
   // Sessions that are chartable (weighted, or bodyweight reps-as-load).
   const chartData = data.filter(r => r.has_weight);
   const isBodyweight = chartData.length > 0 && chartData[0].is_bodyweight;
@@ -213,33 +204,10 @@
     return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
   }
 
-  const baseText = { color: colorMuted, fontFamily: fontBody, fontSize: isCompact ? 10 : 12 };
-  const baseGrid = { top: 30, left: 12, right: 14, bottom: 4, containLabel: true };
-  const baseTooltip = {
-    trigger: "axis",
-    backgroundColor: colorSurface,
-    borderColor: colorBorder,
-    borderWidth: 1,
-    padding: [10, 14],
-    textStyle: { color: colorText, fontFamily: fontBody, fontSize: 12 },
-    extraCssText: "border-radius:12px;box-shadow:0 8px 24px -8px rgba(0,0,0,.5);backdrop-filter:blur(6px);",
-  };
-  const baseXAxis = {
-    type: "category",
-    data: labels,
-    axisLine: { show: false },
-    axisTick: { show: false },
-    // "auto" lets ECharts thin out overlapping labels on both desktop and
-    // mobile; a fixed interval shows every Nth label even when crowded.
-    axisLabel: { ...baseText, rotate: isCompact ? 45 : 0, interval: "auto", hideOverlap: true },
-  };
-  const baseYAxis = {
-    type: "value",
-    axisLine: { show: false },
-    axisTick: { show: false },
-    axisLabel: { ...baseText, formatter: v => Intl.NumberFormat("en", { notation: "compact" }).format(v) },
-    splitLine: { lineStyle: { color: colorDivider, type: [4, 6] } },
-  };
+  const weightEl = document.getElementById("weightChart");
+  const volumeEl = document.getElementById("volumeChart");
+  const weightChart = echarts.init(weightEl, null, { renderer: "canvas" });
+  const volumeChart = echarts.init(volumeEl, null, { renderer: "canvas" });
 
   // ── Top weight chart ─────────────────────────────────────────────────
   // Weighted: top added weight. Bodyweight: effective load incl. bodyweight
@@ -249,9 +217,48 @@
     ? "Top Load per Session (incl. bodyweight)"
     : "Top Weight per Session (kg)";
 
-  const weightEl = document.getElementById("weightChart");
-  const weightChart = echarts.init(weightEl, null, { renderer: "canvas" });
-  weightChart.setOption({
+  // Built from CSS variables on each call so a data-theme toggle re-themes
+  // both charts without a page reload (the canvas can't follow CSS vars).
+  function applyTheme() {
+    const style = getComputedStyle(document.documentElement);
+    const colorText     = style.getPropertyValue("--color-text").trim();
+    const colorMuted    = style.getPropertyValue("--color-text-muted").trim();
+    const colorPrimary  = style.getPropertyValue("--color-primary").trim();
+    const colorBlue     = style.getPropertyValue("--color-blue").trim();
+    const colorDivider  = style.getPropertyValue("--color-divider").trim();
+    const colorSurface  = style.getPropertyValue("--color-surface").trim();
+    const colorBorder   = style.getPropertyValue("--color-border").trim();
+    const fontBody      = style.getPropertyValue("--font-body").trim();
+
+    const baseText = { color: colorMuted, fontFamily: fontBody, fontSize: isCompact ? 10 : 12 };
+    const baseGrid = { top: 30, left: 12, right: 14, bottom: 4, containLabel: true };
+    const baseTooltip = {
+      trigger: "axis",
+      backgroundColor: colorSurface,
+      borderColor: colorBorder,
+      borderWidth: 1,
+      padding: [10, 14],
+      textStyle: { color: colorText, fontFamily: fontBody, fontSize: 12 },
+      extraCssText: "border-radius:12px;box-shadow:0 8px 24px -8px rgba(0,0,0,.5);backdrop-filter:blur(6px);",
+    };
+    const baseXAxis = {
+      type: "category",
+      data: labels,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      // "auto" lets ECharts thin out overlapping labels on both desktop and
+      // mobile; a fixed interval shows every Nth label even when crowded.
+      axisLabel: { ...baseText, rotate: isCompact ? 45 : 0, interval: "auto", hideOverlap: true },
+    };
+    const baseYAxis = {
+      type: "value",
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { ...baseText, formatter: v => Intl.NumberFormat("en", { notation: "compact" }).format(v) },
+      splitLine: { lineStyle: { color: colorDivider, type: [4, 6] } },
+    };
+
+    weightChart.setOption({
     animationDuration: 900,
     animationEasing: "cubicOut",
     textStyle: { fontFamily: fontBody },
@@ -286,11 +293,9 @@
     }],
   });
 
-  // ── Volume chart ─────────────────────────────────────────────────────
-  // kg × reps for weighted exercises; plain rep count for bodyweight.
-  const volumeEl = document.getElementById("volumeChart");
-  const volumeChart = echarts.init(volumeEl, null, { renderer: "canvas" });
-  volumeChart.setOption({
+    // ── Volume chart ─────────────────────────────────────────────────────
+    // kg × reps for weighted exercises; plain rep count for bodyweight.
+    volumeChart.setOption({
     animationDuration: 900,
     animationEasing: "cubicOut",
     textStyle: { fontFamily: fontBody },
@@ -313,7 +318,13 @@
       data: chartData.map(r => r.volume),
       itemStyle: { borderRadius: [6, 6, 0, 0], color: alpha(colorBlue, 0.85) },
     }],
-  });
+    });
+  }
+
+  applyTheme();
+  // The theme toggle only flips data-theme on <html>; the canvas keeps the
+  // colors it was drawn with. Re-apply the options so the charts follow.
+  window.addEventListener("trainlocks:themechange", applyTheme);
 
   // Redraw on container resize (htmx swaps change container size)
   const roWeight = new ResizeObserver(() => weightChart && !weightChart.isDisposed() && weightChart.resize());

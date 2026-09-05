@@ -2,6 +2,7 @@
 {% block title %}Log Session — Training Log{% endblock %}
 {% block content %}
 <div class="page-header">
+  <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/new/session<span class="caret" aria-hidden="true"></span></button>
   <h1 class="page-title">Log Session</h1>
   <p class="page-subtitle">Record your workout</p>
 </div>
@@ -139,7 +140,7 @@
 (function () {
   var form = document.getElementById('session-form');
   if (!form) return;
-  form.addEventListener('submit', function (e) {
+  form.addEventListener('htmx:confirm', function (e) {
     var missing = [];
     document.querySelectorAll('.exercise-block[data-weighted="1"]').forEach(function (block) {
       var exName = block.dataset.name;
@@ -154,8 +155,10 @@
         }
       });
     });
-    if (missing.length && !confirm('No weight entered for ' + missing.join(', ') + '. Save anyway?')) {
-      e.preventDefault();
+    if (!missing.length) return;
+    e.preventDefault();
+    if (confirm('No weight entered for ' + missing.join(', ') + '. Save anyway?')) {
+      e.detail.issueRequest(true);
     }
   });
 })();

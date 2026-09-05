@@ -2,6 +2,7 @@
 {% block title %}Session — {{ session.date }} — Training Log{% endblock %}
 {% block content %}
 <div class="page-header">
+  <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/sessions/view<span class="caret" aria-hidden="true"></span></button>
   <h1 class="page-title">Session — {{ session.date }}</h1>
 </div>
 
@@ -92,7 +93,7 @@
     {% endif %}
    <button id="back-btn" class="btn btn-secondary" style="margin-left:var(--space-3)">Back</button>
    <form method="post" action="/sessions/{{ session.id }}/delete" style="display:inline; margin-left:var(--space-3);"
-     onsubmit="return confirm('Delete this session?');">
+     data-confirm="Delete this session?">
      <button type="submit" class="btn btn-danger">Delete</button>
    </form>
    <script>

@@ -21,14 +21,16 @@
 <body hx-boost="true" hx-target="#app-shell" hx-swap="outerHTML" hx-indicator="#boost-indicator">
   <div id="boost-indicator" class="boost-indicator" aria-hidden="true"></div>
   <script>
-    // Delegated delete-confirm: forms with data-confirm="…" ask before
-    // submitting. Kept out of inline onclick so dynamic values can't be
-    // interpolated into JS.
-    document.addEventListener('submit', (e) => {
-      const msg = e.target instanceof HTMLFormElement ? e.target.dataset.confirm : null;
-      if (msg && !window.confirm(msg)) {
-        e.preventDefault();
-      }
+    // Delete-confirm guard: htmx fires htmx:confirm before any request is
+    // issued, so cancelling truly aborts. (Submit-time handlers can't —
+    // htmx has already sent the boosted request by the time they run.)
+    document.body.addEventListener('htmx:confirm', (e) => {
+      const elt = e.detail && e.detail.elt instanceof Element ? e.detail.elt : null;
+      const form = elt ? elt.closest('form') : null;
+      const msg = (form && form.dataset.confirm) || (elt && elt.dataset.confirm) || null;
+      if (!msg) return;
+      e.preventDefault();
+      if (window.confirm(msg)) e.detail.issueRequest(true);
     });
 
     // Delegated Enter-suppression for multi-row logging forms (marked
@@ -107,6 +109,11 @@
           localStorage.setItem("theme", next);
           if (meta) meta.setAttribute("content", next === "dark" ? "#0b0d12" : "#f5f6f8");
           paint();
+          // Canvas charts (ECharts) can't follow CSS variables — they keep
+          // whatever colors they were drawn with. Tell them to re-apply
+          // their options so the toggle doesn't leave stale light-theme
+          // (or dark-theme) pixels on screen.
+          window.dispatchEvent(new CustomEvent("trainlocks:themechange"));
         });
       }
 
@@ -130,6 +137,8 @@
       document.body.addEventListener("click", (e) => {
         // Resolve fresh on every click — never cache these nodes.
         const toggle = e.target.closest("#menu-toggle");
+        // Desktop drawer trigger: the ~/… eyebrow in each page header.
+        const eyebrowToggle = e.target.closest("[data-nav-toggle]");
         const overlayClicked = e.target.closest("#sidebar-overlay");
         const sidebar = document.getElementById("sidebar");
         const overlay = document.getElementById("sidebar-overlay");
@@ -147,7 +156,7 @@
         };
 
         const navLink = e.target.closest(".nav-link");
-        if (toggle) {
+        if (toggle || eyebrowToggle) {
           sidebar.classList.contains("open") ? closeMenu() : openMenu();
         } else if (overlayClicked) {
           closeMenu();
