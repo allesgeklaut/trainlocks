@@ -391,3 +391,31 @@ class TestExtraction:
         r = client.get("/sessions/ai")
         assert r.status_code == 200
         assert "Upload Screenshot" in r.text
+
+class TestExtractionErrors:
+    def test_extract_non_vision_model_renders_error_page(self, client, llm_state, monkeypatch):
+        """A backend error (e.g. text-only model given an image) renders the
+        upload page with a friendly message instead of a 500."""
+        from app import llm as llm_mod
+
+        async def fake_chat(messages, **kw):
+            raise llm_mod.LLMBackendError(
+                "LLM backend ollama (nemotron-3-super:cloud) returned HTTP 400: "
+                "model does not support images"
+            )
+
+        monkeypatch.setattr(llm_mod, "chat", fake_chat)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+        )
+        assert r.status_code == 502
+        assert "Extraction failed" in r.text
+        assert "may not support images" in r.text
+        # Upload form is still present so the user can retry
+        assert 'action="/sessions/ai/extract"' in r.text
+
+    def test_llm_backend_error_is_importable_and_raised(self, llm_state):
+        from app.llm import LLMBackendError
+        assert issubclass(LLMBackendError, RuntimeError)

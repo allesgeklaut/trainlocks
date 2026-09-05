@@ -7,6 +7,13 @@
   <p class="page-subtitle">Upload a workout screenshot — the AI fills in the session for you to review</p>
 </div>
 
+{% if extract_error %}
+<div class="card ai-error-card" style="max-width:560px;margin-bottom:var(--space-4)">
+  <div class="card-title">Extraction failed</div>
+  <p style="font-size:var(--text-sm);color:var(--color-error);margin:0 0 var(--space-2)">{{ extract_error }}</p>
+</div>
+{% endif %}
+
 <div class="card" style="max-width:560px">
   <div class="card-title">Upload Screenshot</div>
   <form method="post" action="/sessions/ai/extract" enctype="multipart/form-data"
@@ -32,6 +39,7 @@
         <option value="">loading models…</option>
       </select>
     </div>
+    <span class="ai-vision-hint">⚠ Screenshot extraction needs a vision-capable model — e.g. ollama's glm-5.3-flash:cloud or gemma4, or gpt-4o. Text-only models (nemotron, qwen) will fail.</span>
   </div>
 </div>
 {% endblock %}
@@ -169,6 +177,18 @@
     margin-top: var(--space-4);
     padding-top: var(--space-3);
     border-top: 1px solid var(--color-divider);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .ai-vision-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .ai-error-card {
+    border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
   }
 
   .ai-paste-zone {
