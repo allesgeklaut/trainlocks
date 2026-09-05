@@ -1,0 +1,355 @@
+{% extends layout %}
+{% block title %}AI Coach — Training Log{% endblock %}
+{% block styles %}
+<style>
+  .chat-wrap {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 140px);
+    min-height: 420px;
+    max-width: 860px;
+  }
+
+  .chat-scroll {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-2);
+  }
+
+  .chat-msg {
+    max-width: 82%;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .chat-msg.user {
+    align-self: flex-end;
+    background: var(--color-primary);
+    color: var(--color-on-primary);
+    border-bottom-right-radius: var(--radius-sm);
+  }
+
+  .chat-msg.assistant {
+    align-self: flex-start;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-bottom-left-radius: var(--radius-sm);
+  }
+
+  .chat-msg.pending::after {
+    content: "···";
+    display: inline-block;
+    letter-spacing: 2px;
+    animation: chat-pulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes chat-pulse {
+
+    0%,
+    100% {
+      opacity: 0.3;
+    }
+
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .chat-empty {
+    margin: auto;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .chat-empty .hint {
+    display: block;
+    margin-top: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-faint);
+  }
+
+  .chat-inputbar {
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-end;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .chat-inputbar textarea {
+    flex: 1;
+    resize: none;
+    min-height: 44px;
+    max-height: 140px;
+  }
+
+  .chat-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+    padding-bottom: var(--space-2);
+  }
+
+  .chat-toolbar .select-wrap select {
+    max-width: 280px;
+  }
+
+  .chat-hint-error {
+    color: var(--color-error);
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-2);
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-header">
+  <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/coach<span class="caret" aria-hidden="true"></span></button>
+  <h1 class="page-title">AI Coach</h1>
+  <p class="page-subtitle">Chat about your plan and progress — grounded in your training log</p>
+</div>
+
+<div class="chat-wrap card">
+  <div class="chat-toolbar">
+    <div class="select-wrap">
+      <select id="llm-model" title="Active LLM backend / model" onchange="switchLLMModel()">
+        <option value="">loading models…</option>
+      </select>
+    </div>
+    <button type="button" class="btn btn-sm btn-secondary" id="clear-chat"
+      data-confirm="Clear the whole chat history? This cannot be undone.">Clear history</button>
+  </div>
+
+  <div class="chat-scroll" id="chat-scroll">
+    {% if not history %}
+    <div class="chat-empty">
+      Ask your coach anything about training.
+      <span class="hint">e.g. "How has my squat progressed?" · "Plan my next pull day" · "Am I overtraining?"</span>
+    </div>
+    {% endif %}
+    {% for m in history %}
+    <div class="chat-msg {{ m.role }}">{{ m.content }}</div>
+    {% endfor %}
+    <div id="chat-anchor"></div>
+  </div>
+
+  <div class="chat-hint-error" id="chat-error" hidden></div>
+
+  <form class="chat-inputbar" id="chat-form">
+    <textarea id="chat-input" rows="1" placeholder="Message your coach… (Enter to send, Shift+Enter for newline)"></textarea>
+    <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    const scroll = document.getElementById('chat-scroll');
+    const anchor = document.getElementById('chat-anchor');
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('chat-send');
+    const form = document.getElementById('chat-form');
+    const errBox = document.getElementById('chat-error');
+    let busy = false;
+    let pending = null;
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function scrollBottom() {
+      anchor.scrollIntoView({ block: 'end' });
+    }
+
+    function addBubble(role, text, isPending) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + role + (isPending ? ' pending' : '');
+      div.textContent = text;
+      scroll.insertBefore(div, anchor);
+      scrollBottom();
+      return div;
+    }
+
+    // ── Streaming (SSE over fetch) ───────────────────────────────────────
+    async function streamChat(body, onDelta, onThinking, onDone, onError) {
+      let resp;
+      try {
+        resp = await fetch('/coach/send/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+      } catch (e) {
+        onError(e.message);
+        return;
+      }
+      if (!resp.ok || !resp.body) {
+        let msg = 'HTTP ' + resp.status;
+        try { msg += ': ' + await resp.text(); } catch (_) { }
+        onError(msg);
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buf = '';
+      let sawDone = false;
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf('\n\n')) !== -1) {
+            const rawEvt = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const dataLines = rawEvt.split('\n')
+              .filter(l => l.startsWith('data:'))
+              .map(l => l.slice(l.indexOf(':') + 1).trim());
+            if (!dataLines.length) continue;
+            const payload = dataLines.join('\n');
+            if (!payload) continue;
+            let evt;
+            try { evt = JSON.parse(payload); } catch (_) { continue; }
+            if (evt.type === 'delta' && evt.text) onDelta(evt.text);
+            else if (evt.type === 'thinking') onThinking();
+            else if (evt.type === 'done') { sawDone = true; onDone(evt); }
+            else if (evt.type === 'error') onError(evt.text || 'unknown error');
+          }
+        }
+      } catch (e) {
+        onError(e.message);
+        return;
+      }
+      if (!sawDone) onDone({ text: '' });
+    }
+
+    // ── Send flow ────────────────────────────────────────────────────────
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text || busy) return;
+      busy = true;
+      input.value = '';
+      sendBtn.disabled = true;
+      errBox.hidden = true;
+
+      // Remove the empty-state hint if present.
+      const empty = scroll.querySelector('.chat-empty');
+      if (empty) empty.remove();
+
+      addBubble('user', text, false);
+      pending = addBubble('assistant', '', true);
+
+      streamChat(
+        { message: text },
+        chunk => {
+          pending.textContent += chunk;
+          pending.classList.remove('pending');
+          scrollBottom();
+        },
+        () => { /* keep pulsing dots until first delta */ },
+        env => {
+          // Replace pending bubble with the final text (idempotent).
+          if (env && env.text) { pending.textContent = env.text; pending.classList.remove('pending'); }
+          busy = false;
+          sendBtn.disabled = false;
+          input.focus();
+        },
+        msg => {
+          pending.remove();
+          pending = null;
+          errBox.textContent = 'Coach unavailable: ' + msg;
+          errBox.hidden = false;
+          busy = false;
+          sendBtn.disabled = false;
+        }
+      );
+    });
+
+    // Enter to send, Shift+Enter for newline.
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    // ── Clear history ────────────────────────────────────────────────────
+    document.getElementById('clear-chat').addEventListener('click', async function () {
+      const btn = this;
+      if (btn.dataset.confirm && !window.confirm(btn.dataset.confirm)) return;
+      try {
+        const r = await fetch('/coach/history', { method: 'DELETE' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        scroll.querySelectorAll('.chat-msg').forEach(el => el.remove());
+        const div = document.createElement('div');
+        div.className = 'chat-empty';
+        div.innerHTML = 'History cleared.<span class="hint">Start a new conversation any time.</span>';
+        scroll.insertBefore(div, anchor);
+      } catch (e) {
+        errBox.textContent = 'Clear failed: ' + e.message;
+        errBox.hidden = false;
+      }
+    });
+
+    // ── LLM model picker ─────────────────────────────────────────────────
+    async function loadLLMModels() {
+      const sel = document.getElementById('llm-model');
+      try {
+        const st = await (await fetch('/api/llm/status')).json();
+        sel.innerHTML = '';
+        for (const b of (st.backends || [])) {
+          const grp = document.createElement('optgroup');
+          grp.label = b.name;
+          const models = (b.models && b.models.length) ? b.models : [b.model || ''];
+          for (const m of models) {
+            const opt = document.createElement('option');
+            opt.value = b.name + '::' + m;
+            opt.textContent = b.name + ' · ' + (m || '(default)');
+            if (b.name === st.active_backend && m === st.active_model) opt.selected = true;
+            grp.appendChild(opt);
+          }
+          sel.appendChild(grp);
+        }
+        if (!sel.options.length) sel.innerHTML = '<option value="">no LLM backends</option>';
+      } catch (e) {
+        sel.innerHTML = '<option value="">LLM unavailable</option>';
+      }
+    }
+
+    window.switchLLMModel = async function () {
+      const val = document.getElementById('llm-model').value;
+      if (!val) return;
+      const sep = val.indexOf('::');
+      const backend = sep === -1 ? val : val.slice(0, sep);
+      const model = sep === -1 ? '' : val.slice(sep + 2);
+      try {
+        await fetch('/api/llm/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backend, model }),
+        });
+      } catch (e) {
+        errBox.textContent = 'Model switch failed: ' + e.message;
+        errBox.hidden = false;
+        loadLLMModels();
+      }
+    };
+
+    scrollBottom();
+    loadLLMModels();
+  })();
+</script>
+{% endblock %}

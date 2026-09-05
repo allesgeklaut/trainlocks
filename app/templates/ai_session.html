@@ -1,0 +1,98 @@
+{% extends layout %}
+{% block title %}AI Session — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/sessions/ai<span class="caret" aria-hidden="true"></span></button>
+  <h1 class="page-title">Log from Screenshot</h1>
+  <p class="page-subtitle">Upload a workout screenshot — the AI fills in the session for you to review</p>
+</div>
+
+<div class="card" style="max-width:560px">
+  <div class="card-title">Upload Screenshot</div>
+  <form method="post" action="/sessions/ai/extract" enctype="multipart/form-data"
+    hx-boost="false" onsubmit="return aiSubmit(this)">
+    <div class="form-group">
+      <label for="screenshot">Workout screenshot (PNG / JPEG, max 10 MB)</label>
+      <input type="file" id="screenshot" name="screenshot" accept="image/png,image/jpeg,image/webp" required />
+    </div>
+    <button type="submit" class="btn btn-primary" id="ai-btn">Extract with AI</button>
+    <a href="/sessions" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
+    <div id="ai-status" class="ai-status" hidden></div>
+  </form>
+
+  <div class="ai-picker-row">
+    <div class="select-wrap">
+      <select id="llm-model" title="Active LLM backend / model" onchange="switchLLMModel()">
+        <option value="">loading models…</option>
+      </select>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function aiSubmit(form) {
+    const btn = document.getElementById('ai-btn');
+    const status = document.getElementById('ai-status');
+    btn.disabled = true;
+    status.hidden = false;
+    status.textContent = 'Reading the screenshot with ' + (document.getElementById('llm-model').selectedOptions[0]?.text || 'the AI') + ' — this can take a minute…';
+    return true; // normal form POST; server renders the review page
+  }
+
+  async function loadLLMModels() {
+    const sel = document.getElementById('llm-model');
+    try {
+      const st = await (await fetch('/api/llm/status')).json();
+      sel.innerHTML = '';
+      for (const b of (st.backends || [])) {
+        const grp = document.createElement('optgroup');
+        grp.label = b.name;
+        const models = (b.models && b.models.length) ? b.models : [b.model || ''];
+        for (const m of models) {
+          const opt = document.createElement('option');
+          opt.value = b.name + '::' + m;
+          opt.textContent = b.name + ' · ' + (m || '(default)');
+          if (b.name === st.active_backend && m === st.active_model) opt.selected = true;
+          grp.appendChild(opt);
+        }
+        sel.appendChild(grp);
+      }
+      if (!sel.options.length) sel.innerHTML = '<option value="">no LLM backends</option>';
+    } catch (e) {
+      sel.innerHTML = '<option value="">LLM unavailable</option>';
+    }
+  }
+
+  async function switchLLMModel() {
+    const val = document.getElementById('llm-model').value;
+    if (!val) return;
+    const sep = val.indexOf('::');
+    const backend = sep === -1 ? val : val.slice(0, sep);
+    const model = sep === -1 ? '' : val.slice(sep + 2);
+    try {
+      await fetch('/api/llm/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backend, model }),
+      });
+    } catch (e) { loadLLMModels(); }
+  }
+
+  loadLLMModels();
+</script>
+<style>
+  .ai-status {
+    margin-top: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .ai-picker-row {
+    margin-top: var(--space-4);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-divider);
+  }
+</style>
+{% endblock %}

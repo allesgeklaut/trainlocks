@@ -1,0 +1,164 @@
+{% extends layout %}
+{% block title %}Review AI Session — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/sessions/ai/review<span class="caret" aria-hidden="true"></span></button>
+  <h1 class="page-title">Review AI Session</h1>
+  <p class="page-subtitle">Extracted with {{ model_label }} — check everything before saving</p>
+</div>
+
+{% if created_names %}
+<div class="card" style="max-width:560px;margin-bottom:var(--space-4)">
+  <div class="card-title">New exercises created</div>
+  <p style="font-size:var(--text-sm);color:var(--color-text-muted);margin:0">
+    These weren't in your exercise list yet and were added automatically:
+    {{ created_names | join(', ') }}
+  </p>
+</div>
+{% endif %}
+
+<form method="post" action="/sessions/new" data-suppress-enter hx-boost="false" style="max-width:560px">
+  <input type="hidden" name="template_id" value="" />
+
+  <div class="card">
+    <div class="card-title">Session Details</div>
+    <div class="form-group">
+      <label for="date">Date</label>
+      <input type="date" id="date" name="date" value="{{ ai_date }}" required />
+    </div>
+    <div class="form-group">
+      <label for="notes">Notes (optional)</label>
+      <textarea id="notes" name="notes" rows="2" placeholder="How did it feel?">{{ ai_notes }}</textarea>
+    </div>
+  </div>
+
+  {% for re in review_exercises %}
+  {% set ex = re.exercise %}
+  <div class="exercise-block" data-ex-id="{{ ex.id }}" data-name="{{ ex.name }}"
+       data-weighted="{{ '0' if ex.is_bodyweight else '1' }}">
+    <div class="exercise-block-title">
+      {{ loop.index }}. {{ ex.name }}
+      {% if re.is_new %}<span class="badge badge-new">New</span>{% endif %}
+      {% if ex.is_bodyweight %}<span class="badge badge-bw">Bodyweight</span>{% else %}<span class="badge badge-weighted">Weighted</span>{% endif %}
+    </div>
+    <div class="sets-grid">
+      <div class="col-header">Set</div>
+      <div class="col-header">Reps</div>
+      <div class="col-header">Weight (kg)</div>
+      {% for s in re.sets %}
+      <div class="set-num">{{ loop.index }}</div>
+      <input type="number" name="reps-{{ ex.id }}-{{ loop.index }}" min="0" placeholder="0" value="{{ s.reps }}" />
+      {% if ex.is_bodyweight %}
+      <input type="number" step="0.5" name="weight-{{ ex.id }}-{{ loop.index }}" min="0" placeholder="Added kg" value="{{ s.weight if s.weight is not none else '' }}" />
+      {% else %}
+      <input type="number" step="0.5" name="weight-{{ ex.id }}-{{ loop.index }}" min="0" placeholder="kg" value="{{ s.weight if s.weight is not none else '' }}" />
+      {% endif %}
+      {% endfor %}
+      {% set ghost = (re.sets | length) + 1 %}
+      <div class="set-num ghost-row">{{ ghost }}</div>
+      <input type="number" class="ghost-row" name="reps-{{ ex.id }}-{{ ghost }}" min="0" placeholder="0" />
+      <input type="number" step="0.5" class="ghost-row" name="weight-{{ ex.id }}-{{ ghost }}" min="0" placeholder="{{ 'Added kg' if ex.is_bodyweight else 'kg' }}" />
+    </div>
+  </div>
+  {% endfor %}
+
+  {% if ai_cardio %}
+  <div class="card">
+    <div class="card-title">AI-detected cardio</div>
+    <p style="font-size:var(--text-sm);color:var(--color-text-muted)">
+      The screenshot also mentioned cardio. Log it after saving via
+      <a href="/cardio">Cardio</a>:
+    </p>
+    <ul style="font-size:var(--text-sm);margin:0;padding-left:var(--space-5)">
+      {% for c in ai_cardio %}
+      <li>{{ c.activity_type or 'activity' }}{% if c.distance_km %} — {{ c.distance_km }} km{% endif %}{% if c.duration_min %} — {{ c.duration_min }} min{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div style="margin-top:var(--space-4)">
+    <button type="submit" class="btn btn-primary">Save Session</button>
+    <a href="/sessions/ai" class="btn btn-secondary" style="margin-left:var(--space-3)">Discard</a>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Ghost-row promotion (same as new_session.html): typing into the ghost
+  // row makes it real and appends a fresh ghost below.
+  (function () {
+    document.querySelectorAll('.exercise-block').forEach(function (block) {
+      var grid = block.querySelector('.sets-grid');
+
+      function nextSetNum() {
+        var max = 0;
+        grid.querySelectorAll('input[name^="reps-"]').forEach(function (input) {
+          var m = input.name.match(/reps-\d+-(\d+)/);
+          if (m) { var n = parseInt(m[1], 10); if (n > max) max = n; }
+        });
+        return max + 1;
+      }
+
+      function isGhostRow(el) { return el.classList && el.classList.contains('ghost-row'); }
+
+      grid.addEventListener('input', function (e) {
+        if (!isGhostRow(e.target)) return;
+        var t = e.target;
+        if (!t.value) return;
+        block.querySelectorAll('.ghost-row').forEach(function (el) { el.classList.remove('ghost-row'); });
+        var exId = block.dataset.exId;
+        var isBw = grid.querySelector('input[name^="weight-"]').placeholder === 'Added kg';
+        var n = nextSetNum();
+        var numDiv = document.createElement('div');
+        numDiv.className = 'set-num ghost-row';
+        numDiv.textContent = n.toString();
+        var reps = document.createElement('input');
+        reps.type = 'number'; reps.min = '0'; reps.placeholder = '0';
+        reps.className = 'ghost-row'; reps.name = 'reps-' + exId + '-' + n;
+        var wt = document.createElement('input');
+        wt.type = 'number'; wt.step = '0.5'; wt.min = '0';
+        wt.placeholder = isBw ? 'Added kg' : 'kg';
+        wt.className = 'ghost-row'; wt.name = 'weight-' + exId + '-' + n;
+        grid.appendChild(numDiv);
+        grid.appendChild(reps);
+        grid.appendChild(wt);
+      });
+    });
+  })();
+
+  // Save-confirm guard: warn when a weighted exercise has reps but no weight.
+  (function () {
+    var form = document.querySelector('form[action="/sessions/new"]');
+    if (!form) return;
+    form.addEventListener('submit', function (e) {
+      var missing = [];
+      form.querySelectorAll('.exercise-block[data-weighted="1"]').forEach(function (block) {
+        var exName = block.dataset.name;
+        block.querySelectorAll('input[name^="reps-"]').forEach(function (input) {
+          var reps = parseInt(input.value, 10);
+          if (!reps || reps <= 0) return;
+          var weightInput = block.querySelector(
+            'input[name="' + input.name.replace('reps-', 'weight-') + '"]');
+          if (!weightInput || weightInput.value === '') {
+            var m = input.name.match(/-(\d+)$/);
+            missing.push(exName + ' set ' + (m ? m[1] : '?'));
+          }
+        });
+      });
+      if (missing.length) {
+        if (!confirm('No weight entered for ' + missing.join(', ') + '. Save anyway?')) {
+          e.preventDefault();
+        }
+      }
+    });
+  })();
+</script>
+<style>
+  .badge-new {
+    background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+    color: var(--color-warning);
+  }
+</style>
+{% endblock %}
