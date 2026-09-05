@@ -15,6 +15,12 @@
       <label for="screenshot">Workout screenshot (PNG / JPEG, max 10 MB)</label>
       <input type="file" id="screenshot" name="screenshot" accept="image/png,image/jpeg,image/webp" required />
     </div>
+    <div class="form-group ai-paste-zone" id="paste-zone" tabindex="0">
+      <strong>…or paste from clipboard</strong>
+      <span class="ai-paste-hint">Copy a screenshot (Win+Shift+S, Cmd+Shift+4, or "Copy image") and press Ctrl/Cmd+V here or anywhere on this page.</span>
+      <img id="paste-preview" alt="" hidden />
+      <span id="paste-name" class="ai-paste-name" hidden></span>
+    </div>
     <button type="submit" class="btn btn-primary" id="ai-btn">Extract with AI</button>
     <a href="/sessions" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
     <div id="ai-status" class="ai-status" hidden></div>
@@ -32,6 +38,76 @@
 
 {% block scripts %}
 <script>
+  // ── Clipboard paste → fills the file input ─────────────────────────────
+  (function () {
+    const input = document.getElementById('screenshot');
+    const zone = document.getElementById('paste-zone');
+    const preview = document.getElementById('paste-preview');
+    const nameEl = document.getElementById('paste-name');
+    const dataTransfer = new DataTransfer();
+
+    function acceptImage(blob) {
+      if (!blob || !blob.type.startsWith('image/')) return false;
+      if (blob.size > 10 * 1024 * 1024) {
+        alert('Clipboard image is larger than 10 MB.');
+        return true;
+      }
+      const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      const file = new File([blob], 'clipboard.' + ext, { type: blob.type });
+      dataTransfer.items.clear();
+      dataTransfer.items.add(file);
+      input.files = dataTransfer.files;
+      // Show a preview.
+      const url = URL.createObjectURL(blob);
+      preview.src = url;
+      preview.hidden = false;
+      nameEl.textContent = 'clipboard.' + ext + ' (' + Math.round(blob.size / 1024) + ' KB)';
+      nameEl.hidden = false;
+      zone.classList.add('has-image');
+      return true;
+    }
+
+    // Paste anywhere on the page.
+    document.addEventListener('paste', function (e) {
+      const items = (e.clipboardData || window.clipboardData)?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.kind === 'file' && acceptImage(item.getAsFile())) {
+          e.preventDefault();
+          return;
+        }
+      }
+    });
+
+    // Clicking the zone focuses it; Ctrl/Cmd+V then works via the global handler.
+    zone.addEventListener('click', function () { input.click(); });
+    input.addEventListener('change', function () {
+      if (!input.files.length) return;
+      const f = input.files[0];
+      const url = URL.createObjectURL(f);
+      preview.src = url;
+      preview.hidden = false;
+      nameEl.textContent = f.name + ' (' + Math.round(f.size / 1024) + ' KB)';
+      nameEl.hidden = false;
+      zone.classList.add('has-image');
+    });
+
+    // Drag & drop support too.
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+    zone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      zone.classList.remove('drag');
+      const f = e.dataTransfer?.files?.[0];
+      if (f && f.type.startsWith('image/')) {
+        dataTransfer.items.clear();
+        dataTransfer.items.add(f);
+        input.files = dataTransfer.files;
+        input.dispatchEvent(new Event('change'));
+      }
+    });
+  })();
+
   function aiSubmit(form) {
     const btn = document.getElementById('ai-btn');
     const status = document.getElementById('ai-status');
@@ -93,6 +169,42 @@
     margin-top: var(--space-4);
     padding-top: var(--space-3);
     border-top: 1px solid var(--color-divider);
+  }
+
+  .ai-paste-zone {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .ai-paste-zone:hover,
+  .ai-paste-zone.drag {
+    border-color: var(--color-primary);
+    background: var(--color-primary-highlight);
+  }
+
+  .ai-paste-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .ai-paste-zone img {
+    max-width: 240px;
+    max-height: 140px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    align-self: center;
+  }
+
+  .ai-paste-name {
+    font-size: var(--text-xs);
+    color: var(--color-text-faint);
+    text-align: center;
   }
 </style>
 {% endblock %}

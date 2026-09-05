@@ -170,7 +170,9 @@ class TestCoachChat:
         r = client.post("/coach/send/stream", json={"message": "hi coach"})
         assert r.status_code == 200
         body = r.text
-        assert "Hel" in body and '"done"' in body
+        assert "data: " in body and "Hel" in body and '"done"' in body
+        # Proper SSE framing: every event terminated by a blank line.
+        assert body.endswith("\n\n")
 
         # Both the user message and the reply are persisted after the stream.
         msgs = client.get("/coach/history").json()["messages"]

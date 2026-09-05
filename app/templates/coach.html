@@ -51,6 +51,41 @@
     animation: chat-pulse 1.2s ease-in-out infinite;
   }
 
+  .chat-thinking {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  .chat-thinking .dots span {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--color-text-muted);
+    animation: chat-dot 1.2s ease-in-out infinite;
+  }
+
+  .chat-thinking .dots span:nth-child(2) { animation-delay: 0.15s; }
+  .chat-thinking .dots span:nth-child(3) { animation-delay: 0.3s; }
+
+  @keyframes chat-dot {
+
+    0%,
+    100% {
+      opacity: 0.25;
+      transform: translateY(0);
+    }
+
+    50% {
+      opacity: 1;
+      transform: translateY(-3px);
+    }
+  }
+
   @keyframes chat-pulse {
 
     0%,
@@ -90,6 +125,16 @@
     resize: none;
     min-height: 44px;
     max-height: 140px;
+  }
+
+  .btn-stop {
+    background: var(--color-error);
+    color: var(--color-on-primary);
+    border: none;
+  }
+
+  .btn-stop:hover {
+    filter: brightness(1.1);
   }
 
   .chat-toolbar {
@@ -147,6 +192,12 @@
   <form class="chat-inputbar" id="chat-form">
     <textarea id="chat-input" rows="1" placeholder="Message your coach… (Enter to send, Shift+Enter for newline)"></textarea>
     <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
+    <button type="button" class="btn btn-stop" id="chat-stop" hidden title="Stop generating" aria-label="Stop generating">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px">
+        <rect x="6" y="6" width="12" height="12" rx="2" />
+      </svg>
+      Stop
+    </button>
   </form>
 </div>
 {% endblock %}
@@ -160,8 +211,10 @@
     const sendBtn = document.getElementById('chat-send');
     const form = document.getElementById('chat-form');
     const errBox = document.getElementById('chat-error');
+    const stopBtn = document.getElementById('chat-stop');
     let busy = false;
     let pending = null;
+    let abortCtrl = null;
 
     function escapeHtml(s) {
       return s.replace(/[&<>"']/g, c => ({
@@ -182,23 +235,49 @@
       return div;
     }
 
+    function showThinking() {
+      if (!pending) return;
+      pending.classList.add('pending');
+      if (!pending.querySelector('.chat-thinking')) {
+        const t = document.createElement('span');
+        t.className = 'chat-thinking';
+        t.innerHTML = 'thinking<span class="dots"><span></span><span></span><span></span></span>';
+        pending.insertBefore(t, pending.firstChild);
+      }
+    }
+
+    function hideThinking() {
+      if (!pending) return;
+      const t = pending.querySelector('.chat-thinking');
+      if (t) t.remove();
+    }
+
+    function setBusy(b) {
+      busy = b;
+      sendBtn.disabled = b;
+      stopBtn.hidden = !b;
+    }
+
     // ── Streaming (SSE over fetch) ───────────────────────────────────────
-    async function streamChat(body, onDelta, onThinking, onDone, onError) {
+    async function streamChat(body, cbs) {
       let resp;
       try {
+        abortCtrl = new AbortController();
         resp = await fetch('/coach/send/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+          signal: abortCtrl.signal,
         });
       } catch (e) {
-        onError(e.message);
+        if (e.name === 'AbortError') { cbs.onDone({ aborted: true, text: '' }); return; }
+        cbs.onError(e.message);
         return;
       }
       if (!resp.ok || !resp.body) {
         let msg = 'HTTP ' + resp.status;
         try { msg += ': ' + await resp.text(); } catch (_) { }
-        onError(msg);
+        cbs.onError(msg);
         return;
       }
       const reader = resp.body.getReader();
@@ -222,17 +301,18 @@
             if (!payload) continue;
             let evt;
             try { evt = JSON.parse(payload); } catch (_) { continue; }
-            if (evt.type === 'delta' && evt.text) onDelta(evt.text);
-            else if (evt.type === 'thinking') onThinking();
-            else if (evt.type === 'done') { sawDone = true; onDone(evt); }
-            else if (evt.type === 'error') onError(evt.text || 'unknown error');
+            if (evt.type === 'delta' && evt.text) cbs.onDelta(evt.text);
+            else if (evt.type === 'thinking') cbs.onThinking();
+            else if (evt.type === 'done') { sawDone = true; cbs.onDone(evt); }
+            else if (evt.type === 'error') cbs.onError(evt.text || 'unknown error');
           }
         }
       } catch (e) {
-        onError(e.message);
+        if (e.name === 'AbortError') { cbs.onDone({ aborted: true, text: '' }); return; }
+        cbs.onError(e.message);
         return;
       }
-      if (!sawDone) onDone({ text: '' });
+      if (!sawDone) cbs.onDone({ text: '' });
     }
 
     // ── Send flow ────────────────────────────────────────────────────────
@@ -240,9 +320,8 @@
       e.preventDefault();
       const text = input.value.trim();
       if (!text || busy) return;
-      busy = true;
+      setBusy(true);
       input.value = '';
-      sendBtn.disabled = true;
       errBox.hidden = true;
 
       // Remove the empty-state hint if present.
@@ -251,31 +330,48 @@
 
       addBubble('user', text, false);
       pending = addBubble('assistant', '', true);
+      showThinking();
 
       streamChat(
         { message: text },
-        chunk => {
-          pending.textContent += chunk;
-          pending.classList.remove('pending');
-          scrollBottom();
-        },
-        () => { /* keep pulsing dots until first delta */ },
-        env => {
-          // Replace pending bubble with the final text (idempotent).
-          if (env && env.text) { pending.textContent = env.text; pending.classList.remove('pending'); }
-          busy = false;
-          sendBtn.disabled = false;
-          input.focus();
-        },
-        msg => {
-          pending.remove();
-          pending = null;
-          errBox.textContent = 'Coach unavailable: ' + msg;
-          errBox.hidden = false;
-          busy = false;
-          sendBtn.disabled = false;
+        {
+          onDelta: chunk => {
+            hideThinking();
+            pending.classList.remove('pending');
+            pending.textContent += chunk;
+            scrollBottom();
+          },
+          onThinking: () => showThinking(),
+          onDone: env => {
+            hideThinking();
+            if (env && env.text) {
+              pending.textContent = env.text;
+              pending.classList.remove('pending');
+            } else if (env && env.aborted) {
+              // Stopped by the user: keep whatever arrived, mark it.
+              pending.classList.remove('pending');
+              if (!pending.textContent.trim()) pending.textContent = '(stopped)';
+            }
+            pending = null;
+            abortCtrl = null;
+            setBusy(false);
+            input.focus();
+          },
+          onError: msg => {
+            pending.remove();
+            pending = null;
+            abortCtrl = null;
+            errBox.textContent = 'Coach unavailable: ' + msg;
+            errBox.hidden = false;
+            setBusy(false);
+          }
         }
       );
+    });
+
+    // Stop button: abort the in-flight stream, keep partial text.
+    stopBtn.addEventListener('click', function () {
+      if (abortCtrl) abortCtrl.abort();
     });
 
     // Enter to send, Shift+Enter for newline.
@@ -284,6 +380,11 @@
         e.preventDefault();
         form.requestSubmit();
       }
+    });
+
+    // Space toggles stop while generating (nice-to-have).
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && busy && abortCtrl) abortCtrl.abort();
     });
 
     // ── Clear history ────────────────────────────────────────────────────

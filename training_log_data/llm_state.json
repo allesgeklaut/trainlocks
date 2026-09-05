@@ -1,0 +1,6 @@
+{
+  "selected": "ollama",
+  "models": {
+    "ollama": "nemotron-3-super:cloud"
+  }
+}
