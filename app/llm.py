@@ -36,6 +36,10 @@ import httpx
 
 logger = logging.getLogger("trainlocks.llm")
 
+
+class LLMBackendError(RuntimeError):
+    """A backend returned an error response (bad model, vision unsupported, auth, …)."""
+
 # ---------------------------------------------------------------------------
 # Configuration (env vars; trainlocks has no pydantic-settings dependency)
 # ---------------------------------------------------------------------------
@@ -479,8 +483,10 @@ async def _post_chat(
                 json=payload, headers=_auth_headers(backend),
             )
         if getattr(resp, "status_code", 200) != 200:
-            raise RuntimeError(
-                f"LLM backend {backend['name']} returned HTTP {resp.status_code}"
+            body = getattr(resp, "text", "") or ""
+            raise LLMBackendError(
+                f"LLM backend {backend['name']} ({backend['model']}) returned "
+                f"HTTP {resp.status_code}: {body[:300]}"
             )
         data = resp.json()
     return _extract_content(data, backend)

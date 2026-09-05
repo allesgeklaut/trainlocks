@@ -347,12 +347,26 @@ async def ai_session_extract(
         raise HTTPException(status_code=400, detail="file too large (max 10 MB)")
     b64 = base64.b64encode(raw).decode("ascii")
 
-    reply = await llm_mod.chat([
-        {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-        {"role": "user",
-         "content": "Extract the workout session from this screenshot as JSON.",
-         "images": [b64]},
-    ])
+    try:
+        reply = await llm_mod.chat([
+            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user",
+             "content": "Extract the workout session from this screenshot as JSON.",
+             "images": [b64]},
+        ])
+    except llm_mod.LLMBackendError as e:
+        # Most common cause: the active model doesn't accept images (HTTP 400
+        # from the backend). Render the upload page with the error instead of
+        # an unhandled 500.
+        msg = str(e)
+        hint = ("This model may not support images. Pick a vision-capable "
+                "model (e.g. glm-5.3-flash:cloud, gemma4, gpt-4o) from the "
+                "dropdown and try again.")
+        logger.warning("Screenshot extraction failed: %s", msg)
+        return render_page(request, "ai_session.html", {
+            "user": user,
+            "extract_error": f"{msg} — {hint}",
+        }, status_code=502)
     text = (reply.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=502, detail="LLM returned an empty response")
