@@ -363,10 +363,12 @@ async def ai_session_extract(
                 "model (e.g. glm-5.3-flash:cloud, gemma4, gpt-4o) from the "
                 "dropdown and try again.")
         logger.warning("Screenshot extraction failed: %s", msg)
+        # NOTE: 200 on purpose — a 502 would be intercepted by Cloudflare and
+        # replaced with its own "Bad Gateway" page, hiding the helpful error.
         return render_page(request, "ai_session.html", {
             "user": user,
             "extract_error": f"{msg} — {hint}",
-        }, status_code=502)
+        })
     text = (reply.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=502, detail="LLM returned an empty response")
