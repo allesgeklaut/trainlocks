@@ -407,14 +407,12 @@ def test_sessions_overview_shows_cardio_notes(client):
     resp = client.post("/api/cardio", json=_cardio_payload(
         activity_type="swimming", notes="swam at the pool, 6x200m"))
     assert resp.status_code == 201
-    cardio_id = resp.json()["id"]
+    session_id = resp.json()["session_id"]
 
     resp = client.get("/sessions")
     assert resp.status_code == 200
     assert "swam at the pool, 6x200m" in resp.text
-    assert f"/cardio/{cardio_id}/edit" in resp.text
-    # cardio-only session: the row's main Edit button opens the cardio edit
-    assert f'<a href="/cardio/{cardio_id}/edit" class="btn-icon" title="Edit">' in resp.text
+    assert f"window.location.href='/sessions/{session_id}'" in resp.text
 
     resp = client.get("/")
     assert resp.status_code == 200
@@ -422,7 +420,6 @@ def test_sessions_overview_shows_cardio_notes(client):
 
 
 def test_sessions_overview_edit_button_routing(client):
-    # Strength session + cardio: main Edit button stays on the session edit.
     bench_id, _, _, resp = _seed(client)
     assert resp.status_code == 201
     session_id = resp.json()["id"]
@@ -430,7 +427,7 @@ def test_sessions_overview_edit_button_routing(client):
 
     resp = client.get("/sessions")
     assert resp.status_code == 200
-    assert f'/sessions/edit/{session_id}" class="btn-icon" title="Edit"' in resp.text
+    assert f"window.location.href='/sessions/{session_id}'" in resp.text
 
 
 def test_view_session_edit_button_routing(client):
