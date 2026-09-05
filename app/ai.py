@@ -166,7 +166,8 @@ async def coach_send_stream(
                 last_evt = evt
                 if evt.get("type") in ("delta", "done"):
                     final_text = evt.get("text") or final_text
-                yield json.dumps(evt)
+                # Proper SSE framing: 'data:' line + blank line terminator.
+                yield f"data: {json.dumps(evt)}\n\n"
         finally:
             pass
 
