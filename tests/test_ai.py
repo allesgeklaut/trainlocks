@@ -410,7 +410,9 @@ class TestExtractionErrors:
             "/sessions/ai/extract",
             files={"screenshot": ("shot.png", png.encode(), "image/png")},
         )
-        assert r.status_code == 502
+        # 200 (not 502): a 5xx would be swallowed by Cloudflare's own error
+        # page before the user could read the hint.
+        assert r.status_code == 200
         assert "Extraction failed" in r.text
         assert "may not support images" in r.text
         # Upload form is still present so the user can retry
