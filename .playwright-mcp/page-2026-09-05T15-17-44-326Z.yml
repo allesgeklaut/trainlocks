@@ -1,0 +1,60 @@
+- generic [ref=f4e85]:
+  - navigation "Main navigation" [ref=f4e86]:
+    - link "Dashboard" [ref=f4e87] [cursor=pointer]:
+      - /url: /
+    - link "Exercises" [ref=f4e93] [cursor=pointer]:
+      - /url: /exercises
+    - link "Templates" [ref=f4e97] [cursor=pointer]:
+      - /url: /templates
+    - link "Log Session" [ref=f4e102] [cursor=pointer]:
+      - /url: /sessions/new
+    - link "from Screenshot (AI)" [ref=f4e106] [cursor=pointer]:
+      - /url: /sessions/ai
+    - link "Sessions" [ref=f4e111] [cursor=pointer]:
+      - /url: /sessions
+    - link "Cardio" [ref=f4e115] [cursor=pointer]:
+      - /url: /cardio
+    - link "Progression" [ref=f4e119] [cursor=pointer]:
+      - /url: /progression
+    - link "AI Coach" [ref=f4e122] [cursor=pointer]:
+      - /url: /coach
+    - generic [ref=f4e125]: Discover
+    - link "Browse Exercises" [ref=f4e126] [cursor=pointer]:
+      - /url: /browse/exercises
+    - link "Training Plans" [ref=f4e130] [cursor=pointer]:
+      - /url: /browse/plans
+    - generic [ref=f4e134]: Account
+    - link "Profile" [ref=f4e135] [cursor=pointer]:
+      - /url: /profile
+    - button "Toggle theme" [ref=f4e139] [cursor=pointer]:
+      - generic [ref=f4e145]: Theme
+    - generic [ref=f4e146]:
+      - generic [ref=f4e147]: johannes
+      - button "Sign out" [ref=f4e149] [cursor=pointer]
+  - main [ref=f4e150]:
+    - generic [ref=f4e151]:
+      - button "Toggle navigation" [ref=f4e152] [cursor=pointer]: ~/coach
+      - heading "AI Coach" [level=1] [ref=f4e154]
+      - paragraph [ref=f4e155]: Chat about your plan and progress — grounded in your training log
+    - generic [ref=f4e156]:
+      - generic [ref=f4e157]:
+        - combobox "Active LLM backend / model" [ref=f4e159]:
+          - option "llama-server · qwen3.8-27b"
+          - option "llama-server · ornith-1.5-9b"
+          - option "llama-server · qwen-flash-next"
+          - option "ollama · nemotron-3-super:cloud" [selected]
+          - option "ollama · glm-5.3:cloud"
+          - option "ollama · kimi-k3:cloud"
+          - option "ollama · glm-5.3-flash:cloud"
+          - option "ollama · qwen3.5:397b-cloud"
+          - option "ollama · kimi-k2.7-code:cloud"
+          - option "ollama · deepseek-v4-flash:0731-cloud"
+          - option "ollama · deepseek-v4-pro:cloud"
+          - option "ollama · minimax-m3:cloud"
+          - option "ollama · gemma4:31b-cloud"
+        - button "Clear history" [ref=f4e160] [cursor=pointer]
+      - generic [ref=f4e161]: What was my most recent workout? Answer in one short sentence.
+      - generic [ref=f4e163]:
+        - textbox "Message your coach… (Enter to send, Shift+Enter for newline)" [active] [ref=f4e164]
+        - button "Send" [ref=f4e165] [cursor=pointer]
+        - button "Stop generating" [ref=f4e166] [cursor=pointer]: Stop

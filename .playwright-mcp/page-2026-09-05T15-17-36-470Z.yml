@@ -1,0 +1,50 @@
+- generic [ref=f4e2]:
+  - navigation "Main navigation" [ref=f4e3]:
+    - link "Dashboard" [ref=f4e4] [cursor=pointer]:
+      - /url: /
+    - link "Exercises" [ref=f4e10] [cursor=pointer]:
+      - /url: /exercises
+    - link "Templates" [ref=f4e14] [cursor=pointer]:
+      - /url: /templates
+    - link "Log Session" [ref=f4e19] [cursor=pointer]:
+      - /url: /sessions/new
+    - link "from Screenshot (AI)" [ref=f4e23] [cursor=pointer]:
+      - /url: /sessions/ai
+    - link "Sessions" [ref=f4e28] [cursor=pointer]:
+      - /url: /sessions
+    - link "Cardio" [ref=f4e32] [cursor=pointer]:
+      - /url: /cardio
+    - link "Progression" [ref=f4e36] [cursor=pointer]:
+      - /url: /progression
+    - link "AI Coach" [ref=f4e39] [cursor=pointer]:
+      - /url: /coach
+    - generic [ref=f4e42]: Discover
+    - link "Browse Exercises" [ref=f4e43] [cursor=pointer]:
+      - /url: /browse/exercises
+    - link "Training Plans" [ref=f4e47] [cursor=pointer]:
+      - /url: /browse/plans
+    - generic [ref=f4e51]: Account
+    - link "Profile" [ref=f4e52] [cursor=pointer]:
+      - /url: /profile
+    - button "Switch to dark theme" [ref=f4e56] [cursor=pointer]:
+      - generic [ref=f4e60]: Theme
+    - generic [ref=f4e61]:
+      - generic [ref=f4e62]: johannes
+      - button "Sign out" [ref=f4e64] [cursor=pointer]
+  - main [ref=f4e65]:
+    - generic [ref=f4e66]:
+      - button "Toggle navigation" [ref=f4e67] [cursor=pointer]: ~/coach
+      - heading "AI Coach" [level=1] [ref=f4e69]
+      - paragraph [ref=f4e70]: Chat about your plan and progress — grounded in your training log
+    - generic [ref=f4e71]:
+      - generic [ref=f4e72]:
+        - combobox "Active LLM backend / model" [ref=f4e74]:
+          - option "loading models…" [selected]
+        - button "Clear history" [ref=f4e75] [cursor=pointer]
+      - generic [ref=f4e77]:
+        - text: Ask your coach anything about training.
+        - generic [ref=f4e78]: e.g. "How has my squat progressed?" · "Plan my next pull day" · "Am I overtraining?"
+      - generic [ref=f4e79]:
+        - textbox "Message your coach… (Enter to send, Shift+Enter for newline)" [ref=f4e80]
+        - button "Send" [ref=f4e81] [cursor=pointer]
+        - button "Stop generating" [ref=f4e82] [cursor=pointer]: Stop
