@@ -140,7 +140,7 @@
 (function () {
   var form = document.getElementById('session-form');
   if (!form) return;
-  form.addEventListener('submit', function (e) {
+  form.addEventListener('htmx:confirm', function (e) {
     var missing = [];
     document.querySelectorAll('.exercise-block[data-weighted="1"]').forEach(function (block) {
       var exName = block.dataset.name;
@@ -155,8 +155,10 @@
         }
       });
     });
-    if (missing.length && !confirm('No weight entered for ' + missing.join(', ') + '. Save anyway?')) {
-      e.preventDefault();
+    if (!missing.length) return;
+    e.preventDefault();
+    if (confirm('No weight entered for ' + missing.join(', ') + '. Save anyway?')) {
+      e.detail.issueRequest(true);
     }
   });
 })();
