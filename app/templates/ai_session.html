@@ -24,9 +24,16 @@
     </div>
     <div class="form-group ai-paste-zone" id="paste-zone" tabindex="0">
       <strong>…or paste from clipboard</strong>
-      <span class="ai-paste-hint">Copy a screenshot (Win+Shift+S, Cmd+Shift+4, or "Copy image") and press Ctrl/Cmd+V here or anywhere on this page.</span>
+      <span class="ai-paste-hint">Copy a screenshot (Win+Shift+S, Cmd+Shift+4, or "Copy image") and press Ctrl/Cmd+V here or anywhere on this page. On a phone: tap the paste field below, then choose <em>Paste</em>.</span>
       <img id="paste-preview" alt="" hidden />
       <span id="paste-name" class="ai-paste-name" hidden></span>
+    </div>
+    <div class="form-group ai-paste-tap" id="paste-tap-wrap">
+      <label for="paste-catcher">📱 On a phone? Tap here, then tap <em>Paste</em> to insert a screenshot from your clipboard.</label>
+      <!-- contenteditable + focused on tap makes iOS/Android show the native
+           "Paste" bubble; the pasted image arrives as a paste event, which the
+           global handler converts into a file selection. -->
+      <div id="paste-catcher" contenteditable="true" aria-label="Paste screenshot here"></div>
     </div>
     <button type="submit" class="btn btn-primary" id="ai-btn">Extract with AI</button>
     <a href="/sessions" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
@@ -75,16 +82,29 @@
       return true;
     }
 
-    // Paste anywhere on the page.
+    // Paste anywhere on the page (also catches the mobile paste-catcher).
     document.addEventListener('paste', function (e) {
       const items = (e.clipboardData || window.clipboardData)?.items;
       if (!items) return;
       for (const item of items) {
         if (item.kind === 'file' && acceptImage(item.getAsFile())) {
           e.preventDefault();
+          // Clear the mobile paste-catcher so it stays empty for next time.
+          const catcher = document.getElementById('paste-catcher');
+          if (catcher) catcher.innerHTML = '';
           return;
         }
       }
+    });
+
+    // Mobile: focusing a contenteditable shows the native Paste bubble.
+    const catcher = document.getElementById('paste-catcher');
+    document.getElementById('paste-tap-wrap')?.addEventListener('click', function () {
+      catcher.focus();
+    });
+    // Swallow typed characters (only paste makes sense here).
+    catcher.addEventListener('beforeinput', function (e) {
+      if (e.inputType === 'insertText' || e.inputType === 'insertParagraph') e.preventDefault();
     });
 
     // Clicking the zone focuses it; Ctrl/Cmd+V then works via the global handler.
@@ -225,6 +245,31 @@
     font-size: var(--text-xs);
     color: var(--color-text-faint);
     text-align: center;
+  }
+
+  .ai-paste-tap label {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-2);
+  }
+
+  #paste-catcher {
+    min-height: 56px;
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--color-text-faint);
+    outline: none;
+    transition: border-color 0.15s ease;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  #paste-catcher:focus {
+    border-color: var(--color-primary);
+    background: var(--color-primary-highlight);
   }
 </style>
 {% endblock %}
