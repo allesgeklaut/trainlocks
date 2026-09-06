@@ -296,9 +296,9 @@
 
 {% block scripts %}
 <!-- Markdown rendering for assistant replies: marked.js parses, DOMPurify
-     sanitizes the HTML (LLM output is untrusted). -->
-<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+     sanitizes the HTML (LLM output is untrusted). The libs themselves load in
+     base.html's <head> (see comment there) so they're already global when
+     this script runs on htmx boosted swaps. -->
 <script>
   (function () {
     const scroll = document.getElementById('chat-scroll');
