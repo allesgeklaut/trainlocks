@@ -377,6 +377,14 @@ async def ai_session_extract(
         raise HTTPException(status_code=400, detail="file too large (max 10 MB)")
     b64 = base64.b64encode(raw).decode("ascii")
 
+    if not llm_mod.llm_enabled():
+        # Feature is switched off — say so instead of letting the disabled
+        # message fail JSON parsing further down (502 "try another model").
+        return render_page(request, "ai_session.html", {
+            "user": user,
+            "extract_error": llm_mod.LLM_DISABLED_MSG,
+        })
+
     try:
         reply = await llm_mod.chat([
             {"role": "system", "content": _extraction_system_prompt()},
