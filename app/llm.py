@@ -18,6 +18,15 @@ The actively selected backend is persisted to a small JSON file so the choice
 survives restarts.  For backwards compatibility the legacy ``OLLAMA_URL`` /
 ``OLLAMA_MODEL`` settings are honoured when ``LLM_BACKENDS`` is not set.
 
+API key: for OpenAI-compatible backends the ``Authorization: Bearer …`` key
+is resolved in this order — the backend's own ``api_key``, then the file at
+``LITELLM_API_KEY_FILE`` (a dedicated key file, e.g. ``/opt/secrets/
+litellm.key``; preferred so the key is not duplicated into env files), then
+the legacy ``LITELLM_API_KEY`` env var.
+
+``LLM_ENABLED`` (default ``true``) is a master switch: when set to ``false``
+no backends are used and the LLM features report themselves as disabled.
+
 Multimodal messages: a user message may carry an extra ``images`` key — a
 list of base64-encoded images (or ``data:`` URLs).  ``_encode_messages``
 converts these to the shape each protocol expects (Ollama ``images`` array
@@ -49,7 +58,25 @@ _LLM_BACKENDS_RAW = os.environ.get("LLM_BACKENDS", "")
 _OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://host.docker.internal:11434")
 _OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "")
 _LLM_REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "")
+# API key sources, in priority order: the backend's own ``api_key`` (set in
+# LLM_BACKENDS), then a dedicated key file (LITELLM_API_KEY_FILE — single
+# source of truth, e.g. /opt/secrets/litellm.key), then the legacy
+# LITELLM_API_KEY env var.  Preferring the file means the key is not
+# duplicated into per-service env files.
+_LLM_API_KEY_FILE = os.environ.get("LITELLM_API_KEY_FILE", "")
 _LLM_API_KEY_ENV = os.environ.get("LITELLM_API_KEY", "")
+# Master switch for the LLM features (coach chat + screenshot extraction).
+_LLM_ENABLED = os.environ.get("LLM_ENABLED", "true").strip().lower() not in (
+    "0", "false", "no", "off"
+)
+
+# Message surfaced to users when the master switch is off.
+LLM_DISABLED_MSG = "LLM features are disabled (set LLM_ENABLED=true to enable)"
+
+
+def llm_enabled() -> bool:
+    """Whether the LLM feature master switch is on."""
+    return _LLM_ENABLED
 
 # Inside the Docker container /data is the persisted volume; outside of it
 # (local dev) fall back to the project directory.
@@ -60,13 +87,30 @@ _DEFAULT_STATE_FILE = (
 )
 
 
+def _api_key_from_file() -> str:
+    """Read the bare API key from ``LITELLM_API_KEY_FILE`` (or ``""``)."""
+    path = _LLM_API_KEY_FILE.strip()
+    if not path:
+        return ""
+    try:
+        return Path(path).read_text().strip()
+    except OSError as e:
+        logger.warning("Could not read LLM API key file %s: %s", path, e)
+        return ""
+
+
 def _auth_headers(backend: dict[str, Any]) -> dict[str, str]:
     """Authorization headers for an OpenAI-compatible backend.
 
-    Uses the backend's own ``api_key`` if set, otherwise falls back to the
-    shared ``LITELLM_API_KEY`` env var (loaded from /opt/secrets/ by compose).
+    Uses the backend's own ``api_key`` if set, otherwise the key from
+    ``LITELLM_API_KEY_FILE``, otherwise the legacy ``LITELLM_API_KEY`` env var.
     """
-    key = (backend.get("api_key") or _LLM_API_KEY_ENV or "").strip()
+    key = (
+        backend.get("api_key")
+        or _api_key_from_file()
+        or _LLM_API_KEY_ENV
+        or ""
+    ).strip()
     if key:
         return {"Authorization": f"Bearer {key}"}
     return {}
@@ -74,6 +118,8 @@ def _auth_headers(backend: dict[str, Any]) -> dict[str, str]:
 
 def _configured_backends() -> list[dict[str, Any]]:
     """Backends from LLM_BACKENDS, or the legacy OLLAMA_* settings."""
+    if not _LLM_ENABLED:
+        return []
     legacy = [
         {
             "name": "ollama",
@@ -281,8 +327,9 @@ async def chat(messages: list[dict[str, Any]]) -> dict[str, Any]:
     """
     backend = await current_backend()
     if not backend:
+        msg = LLM_DISABLED_MSG if not _LLM_ENABLED else "No LLM backend configured"
         return {
-            "text": "No LLM backend configured",
+            "text": msg,
             "backend": "",
             "model": "",
             "reasoning": "",
@@ -312,7 +359,8 @@ async def chat_stream(messages: list[dict[str, Any]]):
     """
     backend = await current_backend()
     if not backend:
-        yield {"type": "error", "text": "No LLM backend configured"}
+        msg = LLM_DISABLED_MSG if not _LLM_ENABLED else "No LLM backend configured"
+        yield {"type": "error", "text": msg}
         return
     timeout = httpx.Timeout(
         connect=10.0,

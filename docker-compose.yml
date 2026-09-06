@@ -10,13 +10,22 @@ services:
     # Bind mount so the database file is visible in the repository.
     volumes:
       - ./training_log_data:/data
+      # Single source of truth for the LiteLLM API key. Mounted read-only and
+      # read by the app via LITELLM_API_KEY_FILE (below) — the key is NOT
+      # copied into any env file.
+      - /opt/secrets/litellm.key:/run/secrets/litellm.key:ro
     env_file:
       - /opt/secrets/trainlocks.env
     environment:
       - DATABASE_URL=sqlite:////data/training_log.db
-      # LLM settings come from /opt/secrets/trainlocks.env (env_file above):
-      # LLM_BACKENDS, LLM_STATE_FILE, LLM_REASONING_EFFORT, LITELLM_API_KEY.
       - LLM_STATE_FILE=/data/llm_state.json
+      # Path to the dedicated key file (not a secret itself).
+      - LITELLM_API_KEY_FILE=/run/secrets/litellm.key
+      # LLM feature toggle + backend config, read from the optional local
+      # .env file (see .env.example). The defaults keep the stack startable
+      # without a .env (LLM on, no configured backends).
+      - LLM_ENABLED=${LLM_ENABLED:-true}
+      - LLM_BACKENDS=${LLM_BACKENDS:-}
     networks:
       - default
       - stacks-shared

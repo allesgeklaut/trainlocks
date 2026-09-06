@@ -47,6 +47,7 @@ def llm_state(tmp_path, monkeypatch):
         json.dumps([{"name": "fake", "type": "openai",
                      "url": "http://fake.local", "model": "fake-vision"}]),
     )
+    monkeypatch.setattr(llm_mod, "_LLM_ENABLED", True)
     return state_file
 
 
@@ -61,7 +62,7 @@ class TestLLMConfig:
         assert backends[0]["name"] == "fake"
         assert backends[0]["type"] == "openai"
 
-    def test_invalid_json_falls_back_to_legacy(self, monkeypatch, tmp_path):
+    def test_invalid_json_falls_back_to_legacy(self, monkeypatch, tmp_path, llm_state):
         monkeypatch.setattr(llm_mod, "_LLM_BACKENDS_RAW", "not json")
         monkeypatch.setattr(llm_mod, "_OLLAMA_MODEL", "legacy-model")
         backends = llm_mod._configured_backends()
@@ -427,6 +428,20 @@ class TestExtractionErrors:
     def test_llm_backend_error_is_importable_and_raised(self, llm_state):
         from app.llm import LLMBackendError
         assert issubclass(LLMBackendError, RuntimeError)
+
+    def test_extract_when_llm_disabled_renders_error_page(self, client, llm_state, monkeypatch):
+        """With LLM_ENABLED=false the upload page explains the toggle is off,
+        instead of surfacing a confusing 502 "try another model"."""
+        monkeypatch.setattr(llm_mod, "_LLM_ENABLED", False)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+        )
+        assert r.status_code == 200
+        assert llm_mod.LLM_DISABLED_MSG in r.text
+        # Upload form is still present so the user can retry once enabled.
+        assert 'action="/sessions/ai/extract"' in r.text
 
 
 class TestAiSessionSave:
