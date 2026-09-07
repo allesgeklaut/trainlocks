@@ -148,11 +148,19 @@ def _configured_backends() -> list[dict[str, Any]]:
         url = str(b.get("url") or "").strip().rstrip("/")
         model = str(b.get("model") or "").strip()
         api_key = str(b.get("api_key") or "").strip()
+        enable_thinking = bool(b.get("enable_thinking"))
         if btype not in ("ollama", "openai") or not url or not name:
-            logger.warning("Skipping invalid LLM backend entry: %r", b)
+            # Redact the key: a misconfigured entry is exactly the case where
+            # an inline api_key is most likely present, and this line lands
+            # in container logs on every startup.
+            safe = {
+                k: ("***" if k == "api_key" and b.get("api_key") else v)
+                for k, v in b.items()
+            }
+            logger.warning("Skipping invalid LLM backend entry: %r", safe)
             continue
         out.append({"name": name, "type": btype, "url": url, "model": model,
-                    "api_key": api_key})
+                    "api_key": api_key, "enable_thinking": enable_thinking})
     return out
 
 
@@ -173,7 +181,12 @@ def _load_state() -> dict[str, Any]:
 def _save_state(state: dict[str, Any]) -> None:
     try:
         _DEFAULT_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _DEFAULT_STATE_FILE.write_text(json.dumps(state, indent=2))
+        # Atomic replace: a crash mid-write leaves either the old or the new
+        # file, never a torn JSON half-file (the loader would silently
+        # self-heal to {} and drop the persisted selection).
+        tmp = _DEFAULT_STATE_FILE.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, indent=2))
+        os.replace(tmp, _DEFAULT_STATE_FILE)
     except Exception as e:
         logger.warning("Could not write LLM state file %s: %s", _DEFAULT_STATE_FILE, e)
 
@@ -413,20 +426,8 @@ async def chat_stream(messages: list[dict[str, Any]]):
                         if chunk.get("done"):
                             break
             else:
-                payload: dict[str, Any] = {
-                    "model": backend["model"] or "default",
-                    "messages": wire_messages,
-                    "stream": True,
-                    "chat_template_kwargs": {"enable_thinking": True},
-                }
-                effort = str(_LLM_REASONING_EFFORT or "").strip().lower()
-                if effort in ("low", "medium", "high", "xhigh"):
-                    payload["chat_template_kwargs"]["thinking_budget"] = {
-                        "low": 512,
-                        "medium": 2048,
-                        "high": 8192,
-                        "xhigh": 32768,
-                    }[effort]
+                payload = _chat_payload(backend, stream=True)
+                payload["messages"] = wire_messages
                 async with client.stream(
                     "POST", backend["url"] + "/v1/chat/completions",
                     json=payload, headers=_auth_headers(backend),
@@ -477,10 +478,12 @@ async def chat_stream(messages: list[dict[str, Any]]):
             "model": model_id or backend["model"],
         }
     except httpx.RequestError as e:
-        yield {"type": "error", "text": f"Network error: {e}"}
+        logger.warning("LLM stream network error (%s): %s", backend["name"], e)
+        yield {"type": "error", "text": f"Network error contacting the LLM backend ({backend['name']})."}
     except Exception as e:
         # If we already streamed some text, surface the partial plus the error.
         # Otherwise emit an error message as the assistant reply.
+        logger.warning("LLM stream failed (%s): %s", backend["name"], e)
         if full_parts:
             yield {
                 "type": "done",
@@ -488,10 +491,12 @@ async def chat_stream(messages: list[dict[str, Any]]):
                 "reasoning": "".join(reasoning_parts),
                 "backend": backend["name"],
                 "model": model_id or backend["model"],
-                "error": str(e),
+                "error": f"{type(e).__name__}",
             }
         else:
-            yield {"type": "error", "text": f"{type(e).__name__}: {e}"}
+            # Generic client-side message: exception text can carry internal
+            # URLs/paths, so details go to the log, not the browser.
+            yield {"type": "error", "text": f"The LLM backend ({backend['name']}) failed: {type(e).__name__}."}
 
 
 async def _post_chat(
@@ -512,20 +517,8 @@ async def _post_chat(
             }
             resp = await client.post(backend["url"] + "/api/chat", json=req_body)
         else:
-            payload: dict[str, Any] = {
-                "model": backend["model"] or "default",
-                "messages": wire_messages,
-                "stream": False,
-                "chat_template_kwargs": {"enable_thinking": True},
-            }
-            effort = str(_LLM_REASONING_EFFORT or "").strip().lower()
-            if effort in ("low", "medium", "high", "xhigh"):
-                payload["chat_template_kwargs"]["thinking_budget"] = {
-                    "low": 512,
-                    "medium": 2048,
-                    "high": 8192,
-                    "xhigh": 32768,
-                }[effort]
+            payload = _chat_payload(backend, stream=False)
+            payload["messages"] = wire_messages
             resp = await client.post(
                 backend["url"] + "/v1/chat/completions",
                 json=payload, headers=_auth_headers(backend),
@@ -555,3 +548,29 @@ def _extract_content(data: Any, backend: dict[str, Any]) -> tuple[str, str, str]
     content = (msg or {}).get("content") or (data.get("response") if isinstance(data, dict) else "") or ""
     reasoning = (msg or {}).get("reasoning") or ""
     return content, reasoning, backend["model"]
+
+
+def _chat_payload(backend: dict[str, Any], stream: bool) -> dict[str, Any]:
+    """JSON body for one OpenAI-compatible chat call.
+
+    ``chat_template_kwargs`` (enable_thinking / thinking_budget) is opt-in per
+    backend via the ``LLM_BACKENDS`` entry flag ``"enable_thinking"`` — strict
+    OpenAI-compatible APIs reject unknown top-level params with HTTP 400.
+    """
+    payload: dict[str, Any] = {
+        "model": backend["model"] or "default",
+        "messages": [],
+        "stream": stream,
+    }
+    if backend.get("enable_thinking"):
+        kwargs: dict[str, Any] = {"enable_thinking": True}
+        effort = str(_LLM_REASONING_EFFORT or "").strip().lower()
+        if effort in ("low", "medium", "high", "xhigh"):
+            kwargs["thinking_budget"] = {
+                "low": 512,
+                "medium": 2048,
+                "high": 8192,
+                "xhigh": 32768,
+            }[effort]
+        payload["chat_template_kwargs"] = kwargs
+    return payload

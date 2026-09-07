@@ -11,6 +11,7 @@ import json
 import logging
 import re
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -164,7 +165,13 @@ async def coach_send_stream(
     after the stream completes, so a refresh mid-stream never leaves an
     orphan question without an answer in the history.
     """
-    body = await request.json()
+    body_raw = await request.body()
+    try:
+        body = json.loads(body_raw) if body_raw else {}
+        if not isinstance(body, dict):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
     user_text = str(body.get("message") or "").strip()
     if not user_text:
         raise HTTPException(status_code=400, detail="message required")
@@ -186,22 +193,25 @@ async def coach_send_stream(
                 # Proper SSE framing: 'data:' line + blank line terminator.
                 yield f"data: {json.dumps(evt)}\n\n"
         finally:
-            pass
-
-        if last_evt.get("type") == "done" and final_text.strip():
-            _append_coach_message(db, "assistant", final_text)
-        elif last_evt.get("type") == "error":
-            # The turn failed: drop the just-persisted user message so the
-            # history doesn't keep an unanswered question.
-            last_user = (
-                db.query(models.CoachChatMessage)
-                .filter(models.CoachChatMessage.role == "user")
-                .order_by(models.CoachChatMessage.id.desc())
-                .first()
-            )
-            if last_user:
-                db.delete(last_user)
-                db.commit()
+            # Runs on normal completion AND on client disconnect (Stop
+            # button / refresh), which raises GeneratorExit at the yield.
+            # Bookkeeping must live here or a disconnect leaves the user
+            # message persisted with no assistant reply (the orphan the
+            # docstring promises never to produce).
+            if last_evt.get("type") == "done" and final_text.strip():
+                _append_coach_message(db, "assistant", final_text)
+            elif last_evt.get("type") == "error":
+                # The turn failed: drop the just-persisted user message so the
+                # history doesn't keep an unanswered question.
+                last_user = (
+                    db.query(models.CoachChatMessage)
+                    .filter(models.CoachChatMessage.role == "user")
+                    .order_by(models.CoachChatMessage.id.desc())
+                    .first()
+                )
+                if last_user:
+                    db.delete(last_user)
+                    db.commit()
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
@@ -241,7 +251,13 @@ async def llm_status(user: models.User = Depends(get_current_user)):
 
 @router.post("/api/llm/select")
 async def llm_select(request: Request, user: models.User = Depends(get_current_user)):
-    body = await request.json()
+    body_raw = await request.body()
+    try:
+        body = json.loads(body_raw) if body_raw else {}
+        if not isinstance(body, dict):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
     backend = str(body.get("backend") or "")
     model = body.get("model")
     model = str(model) if model is not None else None
@@ -288,8 +304,11 @@ notes so they are preserved.
 - Drop empty/zero rows; keep the exercise order from the screenshot."""
 
 
-def _parse_json_loose(text: str) -> dict:
-    """Best-effort JSON extraction from an LLM reply (handles fences/prose)."""
+def _parse_json_loose(text: str) -> Any:
+    """Best-effort JSON extraction from an LLM reply (handles fences/prose).
+
+    Returns whatever the JSON parses to — the caller must validate the shape.
+    """
     text = text.strip()
     fence = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
     if fence:
@@ -370,10 +389,16 @@ async def ai_session_extract(
     The review form posts to the regular ``POST /sessions/new`` flow, so
     confirming/editing reuses the existing session-creation code path.
     """
+    # Size guard BEFORE reading the body into memory: a multi-GB upload
+    # would otherwise be fully buffered just to be rejected.
+    max_bytes = 10 * 1024 * 1024
+    size = getattr(screenshot, "size", None)
+    if size is not None and size > max_bytes:
+        raise HTTPException(status_code=400, detail="file too large (max 10 MB)")
     raw = await screenshot.read()
     if not raw:
         raise HTTPException(status_code=400, detail="empty file")
-    if len(raw) > 10 * 1024 * 1024:
+    if len(raw) > max_bytes:
         raise HTTPException(status_code=400, detail="file too large (max 10 MB)")
     b64 = base64.b64encode(raw).decode("ascii")
 
@@ -383,6 +408,14 @@ async def ai_session_extract(
         return render_page(request, "ai_session.html", {
             "user": user,
             "extract_error": llm_mod.LLM_DISABLED_MSG,
+        })
+
+    if not await llm_mod.current_backend():
+        # Switch is on but nothing is configured: chat() would return prose
+        # that then fails JSON parsing with a misleading "try another model".
+        return render_page(request, "ai_session.html", {
+            "user": user,
+            "extract_error": "No LLM backend configured — add one via LLM_BACKENDS.",
         })
 
     try:
@@ -409,17 +442,34 @@ async def ai_session_extract(
         })
     text = (reply.get("text") or "").strip()
     if not text:
-        raise HTTPException(status_code=502, detail="LLM returned an empty response")
+        # NOTE: 200 + rendered error, not 502 — a 5xx would be intercepted by
+        # Cloudflare and replaced with its own "Bad Gateway" page, hiding the
+        # helpful error (same rationale as the LLMBackendError branch above).
+        return render_page(request, "ai_session.html", {
+            "user": user,
+            "extract_error": "The AI returned an empty response — try again or pick another model.",
+        })
     try:
         data = _parse_json_loose(text)
-    except (json.JSONDecodeError, ValueError):
-        raise HTTPException(
-            status_code=502,
-            detail="Could not parse the AI response as JSON. Try another model.",
-        )
+    except (json.JSONDecodeError, ValueError, RecursionError):
+        return render_page(request, "ai_session.html", {
+            "user": user,
+            "extract_error": ("Could not parse the AI response as JSON — "
+                              "try another model."),
+        })
+    # The reply comes from an LLM — the shape is untrusted. Anything but a
+    # JSON object fails here rather than crashing the route with a 500.
+    if not isinstance(data, dict):
+        return render_page(request, "ai_session.html", {
+            "user": user,
+            "extract_error": ("The AI response was not a JSON object — "
+                              "try another model."),
+        })
 
     wanted: list[str] = []
     for e in data.get("exercises") or []:
+        if not isinstance(e, dict):
+            continue
         name = str(e.get("name") or "").strip()
         if name and name not in wanted:
             wanted.append(name)
@@ -431,14 +481,20 @@ async def ai_session_extract(
     # POST /sessions/new already understands.
     review_exercises = []
     for name in wanted:
-        ex = mapping[name]
+        ex = mapping.get(name)
+        if ex is None:
+            # e.g. a name that normalizes to nothing ("!!!") — matching
+            # skipped it; skip it here too instead of raising KeyError.
+            continue
         raw_sets = next(
             (e.get("sets") or [] for e in data.get("exercises") or []
-             if str(e.get("name") or "").strip() == name),
+             if isinstance(e, dict) and str(e.get("name") or "").strip() == name),
             [],
         )
         sets = []
         for s in raw_sets:
+            if not isinstance(s, dict):
+                continue
             try:
                 reps = int(s.get("reps") or 0)
             except (TypeError, ValueError):
@@ -466,6 +522,8 @@ async def ai_session_extract(
     # template can post them straight to the cardio flow on save).
     review_cardio = []
     for c in data.get("cardio") or []:
+        if not isinstance(c, dict):
+            continue
         try:
             dist = float(c.get("distance_km")) if c.get("distance_km") is not None else None
         except (TypeError, ValueError):
@@ -551,11 +609,15 @@ async def ai_session_save(
             weight=weight,
         ))
 
-    # Cardio entries checked in the review form.
+    # Cardio entries checked in the review form. The loop keys off the
+    # always-submitted -type select (not the checkbox): unchecked checkboxes
+    # are not POSTed, so an -include loop would stop at the first unchecked
+    # entry and silently drop later checked ones.
     cardio_saved = 0
     idx = 0
-    while f"cardio-{idx}-include" in form:
-        if form.get(f"cardio-{idx}-include") == "1":
+    while f"cardio-{idx}-type" in form:
+        include = form.get(f"cardio-{idx}-include") == "1"
+        if include:
             activity_type = (form.get(f"cardio-{idx}-type") or "other").strip().lower()
             if activity_type not in CARDIO_ACTIVITY_TYPES:
                 activity_type = "other"
