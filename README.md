@@ -15,7 +15,41 @@ FastAPI + SQLite strength training log with progression charts.
   - Line chart: top weight per session
   - Bar chart: total volume (weight × reps) per session
   - Data table
+- AI fitness coach: chat about your plan and progress, grounded in your
+  training data; history persists and can be cleared
+- AI session logging: upload a workout screenshot, the AI extracts the
+  session for review before saving
+- Switchable LLM backends (Ollama or any OpenAI-compatible endpoint) at runtime
 - Light / dark mode
+
+## AI features
+
+Both AI features need at least one configured LLM backend. Configure via the
+`LLM_BACKENDS` env var (JSON list), e.g. in the compose `env_file`
+(`/opt/secrets/trainlocks.env`):
+
+    LLM_BACKENDS=[{"name":"ollama","type":"ollama","url":"http://host.docker.internal:11434","model":"llava:13b"}]
+
+or an OpenAI-compatible endpoint (llama-server, vLLM, LiteLLM, OpenAI, …):
+
+    LLM_BACKENDS=[{"name":"cloud","type":"openai","url":"https://api.example.com","model":"gpt-4o","api_key":"sk-..."}]
+
+- `type: ollama` uses Ollama's native `/api/chat`; `type: openai` uses
+  `/v1/chat/completions`. For screenshot extraction pick a vision-capable
+  model (e.g. `llava`, `gpt-4o`).
+- `LLM_ENABLED=false` turns both AI features off entirely.
+- Add `"enable_thinking": true` to a backend entry to send
+  `chat_template_kwargs` (thinking budget via `LLM_REASONING_EFFORT`) —
+  only for backends that accept these extra params.
+- The active backend/model is selectable at runtime from the AI Coach page
+  (dropdown) and persisted across restarts in `/data/llm_state.json`.
+- Legacy single-backend config via `OLLAMA_URL` / `OLLAMA_MODEL` still works.
+
+Endpoints:
+
+- `GET /coach` — chat UI; `POST /coach/send/stream` (SSE); `GET/DELETE /coach/history`
+- `GET /sessions/ai` — screenshot upload; `POST /sessions/ai/extract` renders a review form
+- `GET /api/llm/status`, `POST /api/llm/select` — backend discovery & switching
 
 ## Run with Docker Compose (recommended)
 

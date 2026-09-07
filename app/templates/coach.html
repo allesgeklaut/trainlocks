@@ -1,0 +1,578 @@
+{% extends layout %}
+{% block title %}AI Coach — Training Log{% endblock %}
+{% block styles %}
+<style>
+  .chat-wrap {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 140px);
+    min-height: 420px;
+    max-width: 860px;
+  }
+
+  .chat-scroll {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-2);
+  }
+
+  .chat-msg {
+    max-width: 82%;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
+    line-height: 1.55;
+    word-break: break-word;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .chat-msg.user {
+    white-space: pre-wrap;
+  }
+
+  /* Markdown content inside assistant bubbles */
+  .chat-msg.assistant > *:first-child { margin-top: 0; }
+  .chat-msg.assistant > *:last-child { margin-bottom: 0; }
+
+  .chat-msg.assistant p {
+    margin: 0 0 var(--space-2);
+  }
+
+  .chat-msg.assistant ul,
+  .chat-msg.assistant ol {
+    margin: 0 0 var(--space-2);
+    padding-left: var(--space-5);
+  }
+
+  .chat-msg.assistant li { margin: 2px 0; }
+
+  .chat-msg.assistant h1,
+  .chat-msg.assistant h2,
+  .chat-msg.assistant h3,
+  .chat-msg.assistant h4 {
+    font-size: var(--text-base);
+    margin: var(--space-3) 0 var(--space-2);
+    font-weight: 600;
+  }
+
+  .chat-msg.assistant strong { font-weight: 700; }
+
+  .chat-msg.assistant code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--text-xs);
+    background: var(--color-surface-offset);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+  }
+
+  .chat-msg.assistant pre {
+    background: var(--color-surface-offset);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
+    overflow-x: auto;
+    margin: 0 0 var(--space-2);
+  }
+
+  .chat-msg.assistant pre code {
+    background: none;
+    padding: 0;
+  }
+
+  .chat-msg.assistant blockquote {
+    margin: 0 0 var(--space-2);
+    padding-left: var(--space-3);
+    border-left: 3px solid var(--color-border);
+    color: var(--color-text-muted);
+  }
+
+  /* Markdown tables: the coach outputs programs as tables a lot. */
+  .chat-msg.assistant .table-scroll {
+    overflow-x: auto;
+    margin: 0 0 var(--space-2);
+  }
+
+  .chat-msg.assistant table {
+    border-collapse: collapse;
+    font-size: var(--text-xs);
+    margin: 0 auto var(--space-2);
+    width: auto;
+  }
+
+  .chat-msg.assistant th,
+  .chat-msg.assistant td {
+    border: 1px solid var(--color-border);
+    padding: 4px 10px;
+    text-align: left;
+  }
+
+  .chat-msg.assistant th {
+    background: var(--color-surface-offset);
+    font-weight: 600;
+  }
+
+  .chat-msg.user {
+    align-self: flex-end;
+    background: var(--color-primary);
+    color: var(--color-on-primary);
+    border-bottom-right-radius: var(--radius-sm);
+  }
+
+  .chat-msg.assistant {
+    align-self: flex-start;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-border);
+    border-bottom-left-radius: var(--radius-sm);
+  }
+
+  .chat-msg.pending::after {
+    content: "···";
+    display: inline-block;
+    letter-spacing: 2px;
+    animation: chat-pulse 1.2s ease-in-out infinite;
+  }
+
+  /* Only show the ::after dots when there's no explicit thinking indicator
+     inside (otherwise the dots would appear twice). */
+  .chat-msg.pending:has(.chat-thinking)::after {
+    content: none;
+  }
+
+  .chat-thinking {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    font-style: italic;
+  }
+
+  .chat-thinking .dots span {
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--color-text-muted);
+    animation: chat-dot 1.2s ease-in-out infinite;
+  }
+
+  .chat-thinking .dots span:nth-child(2) { animation-delay: 0.15s; }
+  .chat-thinking .dots span:nth-child(3) { animation-delay: 0.3s; }
+
+  @keyframes chat-dot {
+
+    0%,
+    100% {
+      opacity: 0.25;
+      transform: translateY(0);
+    }
+
+    50% {
+      opacity: 1;
+      transform: translateY(-3px);
+    }
+  }
+
+  @keyframes chat-pulse {
+
+    0%,
+    100% {
+      opacity: 0.3;
+    }
+
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .chat-empty {
+    margin: auto;
+    text-align: center;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+
+  .chat-empty .hint {
+    display: block;
+    margin-top: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-faint);
+  }
+
+  .chat-inputbar {
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-end;
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-divider);
+  }
+
+  .chat-inputbar textarea {
+    flex: 1;
+    resize: none;
+    min-height: 44px;
+    max-height: 140px;
+  }
+
+  .btn-stop {
+    background: var(--color-error);
+    color: var(--color-on-primary);
+    border: none;
+  }
+
+  .btn-stop:hover {
+    filter: brightness(1.1);
+  }
+
+  .chat-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+    padding-bottom: var(--space-2);
+  }
+
+  .chat-toolbar .select-wrap select {
+    max-width: 280px;
+  }
+
+  .chat-hint-error {
+    color: var(--color-error);
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-2);
+  }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-header">
+  <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/coach<span class="caret" aria-hidden="true"></span></button>
+  <h1 class="page-title">AI Coach</h1>
+  <p class="page-subtitle">Chat about your plan and progress — grounded in your training log</p>
+</div>
+
+<div class="chat-wrap card">
+  <div class="chat-toolbar">
+    <div class="select-wrap">
+      <select id="llm-model" title="Active LLM backend / model" onchange="switchLLMModel()">
+        <option value="">loading models…</option>
+      </select>
+    </div>
+    <button type="button" class="btn btn-sm btn-secondary" id="clear-chat"
+      data-confirm="Clear the whole chat history? This cannot be undone.">Clear history</button>
+  </div>
+
+  <div class="chat-scroll" id="chat-scroll">
+    {% if not history %}
+    <div class="chat-empty">
+      Ask your coach anything about training.
+      <span class="hint">e.g. "How has my squat progressed?" · "Plan my next pull day" · "Am I overtraining?"</span>
+    </div>
+    {% endif %}
+    {% for m in history %}
+    <div class="chat-msg {{ m.role }}" data-role="{{ m.role }}">{{ m.content }}</div>
+    {% endfor %}
+    <div id="chat-anchor"></div>
+  </div>
+
+  <div class="chat-hint-error" id="chat-error" hidden></div>
+
+  <!-- hx-boost="false": body-level boost would hijack this form's submit and
+       swap the page mid-stream, killing the SSE fetch and wiping the chat. -->
+  <form class="chat-inputbar" id="chat-form" hx-boost="false">
+    <textarea id="chat-input" rows="1" placeholder="Message your coach… (Enter to send, Shift+Enter for newline)"></textarea>
+    <button type="submit" class="btn btn-primary" id="chat-send">Send</button>
+    <button type="button" class="btn btn-stop" id="chat-stop" hidden title="Stop generating" aria-label="Stop generating">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:-2px">
+        <rect x="6" y="6" width="12" height="12" rx="2" />
+      </svg>
+      Stop
+    </button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Markdown rendering for assistant replies: marked.js parses, DOMPurify
+     sanitizes the HTML (LLM output is untrusted). The libs themselves load in
+     base.html's <head> (see comment there) so they're already global when
+     this script runs on htmx boosted swaps. -->
+<script>
+  (function () {
+    const scroll = document.getElementById('chat-scroll');
+    const anchor = document.getElementById('chat-anchor');
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('chat-send');
+    const form = document.getElementById('chat-form');
+    const errBox = document.getElementById('chat-error');
+    const stopBtn = document.getElementById('chat-stop');
+    let busy = false;
+    let pending = null;
+    let pendingRaw = '';
+    let abortCtrl = null;
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function scrollBottom() {
+      anchor.scrollIntoView({ block: 'end' });
+    }
+
+    // Render markdown to sanitized HTML. Falls back to plain text when the
+    // CDN libs are unavailable (offline), so the chat still works.
+    function renderMarkdown(text) {
+      if (window.marked && window.DOMPurify) {
+        window.marked.setOptions({ breaks: true, gfm: true });
+        return window.DOMPurify.sanitize(window.marked.parse(text));
+      }
+      return escapeHtml(text);
+    }
+
+    function addBubble(role, text, isPending) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg ' + role + (isPending ? ' pending' : '');
+      if (role === 'assistant' && text) {
+        div.innerHTML = renderMarkdown(text);
+      } else {
+        div.textContent = text;
+      }
+      scroll.insertBefore(div, anchor);
+      scrollBottom();
+      return div;
+    }
+
+    function showThinking() {
+      if (!pending) return;
+      pending.classList.add('pending');
+      if (!pending.querySelector('.chat-thinking')) {
+        const t = document.createElement('span');
+        t.className = 'chat-thinking';
+        t.innerHTML = 'thinking<span class="dots"><span></span><span></span><span></span></span>';
+        pending.insertBefore(t, pending.firstChild);
+      }
+    }
+
+    function hideThinking() {
+      if (!pending) return;
+      const t = pending.querySelector('.chat-thinking');
+      if (t) t.remove();
+    }
+
+    function setBusy(b) {
+      busy = b;
+      sendBtn.disabled = b;
+      stopBtn.hidden = !b;
+    }
+
+    // ── Streaming (SSE over fetch) ───────────────────────────────────────
+    async function streamChat(body, cbs) {
+      let resp;
+      try {
+        abortCtrl = new AbortController();
+        resp = await fetch('/coach/send/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: abortCtrl.signal,
+        });
+      } catch (e) {
+        if (e.name === 'AbortError') { cbs.onDone({ aborted: true, text: '' }); return; }
+        cbs.onError(e.message);
+        return;
+      }
+      if (!resp.ok || !resp.body) {
+        let msg = 'HTTP ' + resp.status;
+        try { msg += ': ' + await resp.text(); } catch (_) { }
+        cbs.onError(msg);
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buf = '';
+      let sawDone = false;
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buf.indexOf('\n\n')) !== -1) {
+            const rawEvt = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const dataLines = rawEvt.split('\n')
+              .filter(l => l.startsWith('data:'))
+              .map(l => l.slice(l.indexOf(':') + 1).trim());
+            if (!dataLines.length) continue;
+            const payload = dataLines.join('\n');
+            if (!payload) continue;
+            let evt;
+            try { evt = JSON.parse(payload); } catch (_) { continue; }
+            if (evt.type === 'delta' && evt.text) cbs.onDelta(evt.text);
+            else if (evt.type === 'thinking') cbs.onThinking();
+            else if (evt.type === 'done') { sawDone = true; cbs.onDone(evt); }
+            else if (evt.type === 'error') cbs.onError(evt.text || 'unknown error');
+          }
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') { cbs.onDone({ aborted: true, text: '' }); return; }
+        cbs.onError(e.message);
+        return;
+      }
+      if (!sawDone) cbs.onDone({ text: '' });
+    }
+
+    // ── Send flow ────────────────────────────────────────────────────────
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text || busy) return;
+      setBusy(true);
+      input.value = '';
+      errBox.hidden = true;
+
+      // Remove the empty-state hint if present.
+      const empty = scroll.querySelector('.chat-empty');
+      if (empty) empty.remove();
+
+      addBubble('user', text, false);
+      pending = addBubble('assistant', '', true);
+      showThinking();
+
+      streamChat(
+        { message: text },
+        {
+          onDelta: chunk => {
+            hideThinking();
+            pending.classList.remove('pending');
+            pendingRaw += chunk;
+            // Re-render the accumulated markdown on each delta.
+            pending.innerHTML = renderMarkdown(pendingRaw);
+            scrollBottom();
+          },
+          onThinking: () => showThinking(),
+          onDone: env => {
+            hideThinking();
+            if (env && env.text) {
+              pendingRaw = env.text;
+              pending.innerHTML = renderMarkdown(env.text);
+              pending.classList.remove('pending');
+            } else if (env && env.aborted) {
+              // Stopped by the user: keep whatever arrived, mark it.
+              pending.classList.remove('pending');
+              if (!pendingRaw.trim()) pending.textContent = '(stopped)';
+            }
+            pendingRaw = '';
+            pending = null;
+            abortCtrl = null;
+            setBusy(false);
+            input.focus();
+          },
+          onError: msg => {
+            pending.remove();
+            pending = null;
+            pendingRaw = '';
+            abortCtrl = null;
+            errBox.textContent = 'Coach unavailable: ' + msg;
+            errBox.hidden = false;
+            setBusy(false);
+          }
+        }
+      );
+    });
+
+    // Stop button: abort the in-flight stream, keep partial text.
+    stopBtn.addEventListener('click', function () {
+      if (abortCtrl) abortCtrl.abort();
+    });
+
+    // Enter to send, Shift+Enter for newline.
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    // Space toggles stop while generating (nice-to-have).
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && busy && abortCtrl) abortCtrl.abort();
+    });
+
+    // ── Clear history ────────────────────────────────────────────────────
+    document.getElementById('clear-chat').addEventListener('click', async function () {
+      const btn = this;
+      if (btn.dataset.confirm && !window.confirm(btn.dataset.confirm)) return;
+      try {
+        const r = await fetch('/coach/history', { method: 'DELETE' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        scroll.querySelectorAll('.chat-msg').forEach(el => el.remove());
+        const div = document.createElement('div');
+        div.className = 'chat-empty';
+        div.innerHTML = 'History cleared.<span class="hint">Start a new conversation any time.</span>';
+        scroll.insertBefore(div, anchor);
+      } catch (e) {
+        errBox.textContent = 'Clear failed: ' + e.message;
+        errBox.hidden = false;
+      }
+    });
+
+    // ── LLM model picker ─────────────────────────────────────────────────
+    async function loadLLMModels() {
+      const sel = document.getElementById('llm-model');
+      try {
+        const st = await (await fetch('/api/llm/status')).json();
+        sel.innerHTML = '';
+        for (const b of (st.backends || [])) {
+          const grp = document.createElement('optgroup');
+          grp.label = b.name;
+          const models = (b.models && b.models.length) ? b.models : [b.model || ''];
+          for (const m of models) {
+            const opt = document.createElement('option');
+            opt.value = b.name + '::' + m;
+            opt.textContent = b.name + ' · ' + (m || '(default)');
+            if (b.name === st.active_backend && m === st.active_model) opt.selected = true;
+            grp.appendChild(opt);
+          }
+          sel.appendChild(grp);
+        }
+        if (!sel.options.length) sel.innerHTML = '<option value="">no LLM backends</option>';
+      } catch (e) {
+        sel.innerHTML = '<option value="">LLM unavailable</option>';
+      }
+    }
+
+    window.switchLLMModel = async function () {
+      const val = document.getElementById('llm-model').value;
+      if (!val) return;
+      const sep = val.indexOf('::');
+      const backend = sep === -1 ? val : val.slice(0, sep);
+      const model = sep === -1 ? '' : val.slice(sep + 2);
+      try {
+        await fetch('/api/llm/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backend, model }),
+        });
+      } catch (e) {
+        errBox.textContent = 'Model switch failed: ' + e.message;
+        errBox.hidden = false;
+        loadLLMModels();
+      }
+    };
+
+    scrollBottom();
+
+    // Render persisted assistant messages as markdown (they were stored raw).
+    document.querySelectorAll('.chat-msg.assistant').forEach(el => {
+      el.innerHTML = renderMarkdown(el.textContent);
+    });
+
+    loadLLMModels();
+  })();
+</script>
+{% endblock %}

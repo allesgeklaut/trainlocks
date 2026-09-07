@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import text as sa_text, func, Boolean
 
@@ -45,8 +44,22 @@ if use_test_db:
 
 # 3. Now import local application modules (which will now pick up the correct DATABASE_URL)
 from . import models
+from .ai import router as ai_router
 from .auth import get_current_user, create_session_cookie, verify_password, COOKIE_NAME, SESSION_MAX_AGE
 from .database import Base, SessionLocal, engine
+from .web import (
+    BODYWEIGHT_DEFAULT_KG,
+    _form_str,
+    CARDIO_ACTIVITY_TYPES,
+    _cardio_json,
+    _cardio_load_factor,
+    _cardio_pace,
+    _cardio_pace_unit,
+    _iso_week_key,
+    _parse_duration_min,
+    render_page,
+    templates,
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -81,38 +94,32 @@ with engine.begin() as conn:
         conn.execute(sa_text("ALTER TABLE users ADD COLUMN bodyweight FLOAT"))
     except Exception:
         pass
+    # coach_chat_messages backs the AI fitness-coach chat history; create_all
+    # DOES add missing tables to existing DBs, but an explicit idempotent
+    # CREATE keeps this migration block self-contained and matches the
+    # cardio-table pattern above.
+    conn.execute(sa_text(
+        """
+        CREATE TABLE IF NOT EXISTS coach_chat_messages (
+            id INTEGER NOT NULL PRIMARY KEY,
+            role VARCHAR(16) NOT NULL,
+            content TEXT NOT NULL,
+            created_at DATETIME
+        )
+        """
+    ))
+    conn.execute(sa_text(
+        "CREATE INDEX IF NOT EXISTS ix_coach_chat_messages_created_at "
+        "ON coach_chat_messages (created_at)"
+    ))
 
 app = FastAPI(title="Training Log Dashboard")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-templates = Jinja2Templates(directory="app/templates")
+app.include_router(ai_router)
 # Cache-buster for static assets: bumps on every app startup so proxies and
 # browsers re-fetch CSS/JS after a rebuild.
 STATIC_VERSION = str(int(time.time()))
 templates.env.globals["static_version"] = STATIC_VERSION
-
-
-def render_page(request: Request, template_name: str, context: dict,
-                status_code: int = 200):
-    """Render a page response, as a full document or an htmx fragment.
-
-    Boosted navigation swaps #app-shell (sidebar + main + page scripts).
-    If htmx received a full document, it would insert *all* of the
-    response body's children at the swap point (htmx P() puts the entire
-    body into the fragment) — duplicating the fixed topbar/overlay/indicator
-    and re-running base scripts on every navigation. So htmx requests are
-    answered with a shell-only layout (base_shell.html): title + page
-    styles + #app-shell. Full documents (base.html) are only sent to
-    normal loads, which the browser renders from scratch.
-
-    History restores fetch the URL without an HX-Request header, so they
-    correctly receive full documents.
-    """
-    is_htmx = "hx-request" in {k.lower() for k in request.headers}
-    # Per-request context (not app.state): concurrent renders must not
-    # race on the layout choice.
-    context.setdefault("layout", "base_shell.html" if is_htmx else "base.html")
-    return templates.TemplateResponse(request, template_name, context,
-                                      status_code=status_code)
 
 
 def _cardio_pace_display(c) -> str:
@@ -130,53 +137,7 @@ def _cardio_pace_display(c) -> str:
 
 templates.env.globals["_cardio_pace_display"] = _cardio_pace_display
 
-# Dashboard cardio load: per-activity effort multiplier applied to distance (km).
-CARDIO_LOAD_FACTOR = {"running": 1.0, "swimming": 3.0}
-# Canonical activity types accepted by the form and API routes; must match
-# the <option> lists in cardio.html / cardio_edit.html.
-CARDIO_ACTIVITY_TYPES = ("running", "swimming", "cycling", "walking", "rowing", "other")
-# Fallback for bodyweight-exercise load scaling when the user hasn't set a
-# bodyweight in their profile.
-BODYWEIGHT_DEFAULT_KG = 80.0
-CARDIO_LOAD_DEFAULT_FACTOR = 1.0
-
-
-def _cardio_load_factor(activity_type: str) -> float:
-    return CARDIO_LOAD_FACTOR.get((activity_type or "").lower(), CARDIO_LOAD_DEFAULT_FACTOR)
-
-
-def _iso_week_key(d: date) -> str:
-    """Canonical chart bucket key for a date, e.g. '2026-W36' (ISO, Monday-aligned)."""
-    iso = d.isocalendar()
-    return f"{iso[0]}-W{iso[1]:02d}"
-
-
-def _parse_duration_min(value) -> float | None:
-    """Parse a form duration: minutes ('45', '44.85') or M:SS / H:MM:SS ('44:51').
-
-    Raises ValueError for non-empty values that don't match.
-    """
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    value = value.strip()
-    if not value:
-        return None
-    parts = value.split(":")
-    if len(parts) in (2, 3) and all(p.strip().isdigit() for p in parts):
-        nums = [int(p) for p in parts]
-        if len(nums) == 2:
-            h, m, s = 0, nums[0], nums[1]
-        else:
-            h, m, s = nums
-        if not (0 <= m < 60 and 0 <= s < 60):
-            raise ValueError("invalid duration")
-        return h * 60 + m + s / 60
-    try:
-        return float(value)
-    except ValueError:
-        raise ValueError("invalid duration")
+# _parse_duration_min lives in web.py (shared with the AI router).
 
 
 def _cardio_duration_display(c) -> str:
@@ -322,7 +283,7 @@ async def profile_update(
     db: Session = Depends(get_db),
 ):
     form = await request.form()
-    raw = form.get("bodyweight")
+    raw = _form_str(form.get("bodyweight"))
     try:
         bodyweight = float(raw) if raw is not None and str(raw).strip() else None
     except ValueError:
@@ -332,7 +293,9 @@ async def profile_update(
     if bodyweight is not None and not (bodyweight > 0 and math.isfinite(bodyweight)):
         raise HTTPException(status_code=400, detail="bodyweight must be a positive number in kg")
     # user comes from get_current_user's own session; persist via the route's.
-    db.get(models.User, user.id).bodyweight = bodyweight
+    db_user = db.get(models.User, user.id)
+    if db_user is not None:
+        db_user.bodyweight = bodyweight
     db.commit()
     return RedirectResponse("/profile?saved=1", status_code=303)
 
@@ -366,7 +329,7 @@ def _dashboard_context(user: models.User, db: Session, weeks: int) -> dict:
     weekly_load = defaultdict(float)
     bodyweight_kg = user.bodyweight or BODYWEIGHT_DEFAULT_KG
     for sess in recent_sessions_full:
-        week_key = _iso_week_key(sess.date)
+        week_key = _iso_week_key(sess.date or date.today())
         for set_entry in sess.sets:
             is_bodyweight = bool(set_entry.exercise and set_entry.exercise.is_bodyweight)
             if is_bodyweight:
@@ -386,7 +349,7 @@ def _dashboard_context(user: models.User, db: Session, weeks: int) -> dict:
     )
     weekly_cardio_load = defaultdict(float)
     for a in cardio_activities:
-        week_key = _iso_week_key(a.session.date)
+        week_key = _iso_week_key(a.session.date if a.session else date.today())
         if a.distance_km:
             weekly_cardio_load[week_key] += a.distance_km * _cardio_load_factor(a.activity_type)
 
@@ -547,7 +510,7 @@ async def add_exercise_to_template(
     tpl = db.get(models.SessionTemplate, template_id)
     if not tpl:
         raise HTTPException(status_code=404)
-    max_order = max((te.order for te in tpl.exercises), default=0)
+    max_order = max((te.order or 0 for te in tpl.exercises), default=0)
     te = models.SessionTemplateExercise(
         session_template_id=template_id, exercise_id=exercise_id,
         sets=sets, order=max_order + 1,
@@ -594,7 +557,7 @@ async def new_session(request: Request, user: models.User = Depends(get_current_
 @app.post("/sessions/new")
 async def create_session(request: Request, user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     form = await request.form()
-    date_str = form.get("date")
+    date_str = _form_str(form.get("date"))
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
     try:
@@ -603,9 +566,9 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
         raise HTTPException(status_code=400, detail="Invalid date")
 
     template_id = None
-    if form.get("template_id"):
+    if _form_str(form.get("template_id")):
         try:
-            template_id = int(form["template_id"])
+            template_id = int(_form_str(form["template_id"]))
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid template id")
     template = db.get(models.SessionTemplate, template_id) if template_id else None
@@ -613,7 +576,7 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
     workout = models.WorkoutSession(
         date=workout_date,
         template_id=template_id,
-        notes=form.get("notes") or None,
+        notes=_form_str(form.get("notes")) or None,
     )
     db.add(workout)
     db.flush()
@@ -630,9 +593,9 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
         except (ValueError, IndexError):
             continue
 
-        weight_val = form.get(f"weight-{ex_id}-{set_num}")
+        weight_val = _form_str(form.get(f"weight-{ex_id}-{set_num}"))
         try:
-            reps = int(value) if value else 0
+            reps = int(_form_str(value)) if _form_str(value) else 0
         except ValueError:
             reps = 0
         try:
@@ -701,6 +664,8 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
     # Group sets by exercise.
     sets_by_exercise: dict[int, list[models.SetEntry]] = {}
     for se in sess.sets:
+        if se.exercise_id is None:
+            continue
         sets_by_exercise.setdefault(se.exercise_id, []).append(se)
 
     def make_dummy(exercise, set_numbers, order):
@@ -718,14 +683,16 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
         # that were skipped when the session was logged can still be
         # added here. Exercises without sets render only their ghost row.
         for order_idx, te in enumerate(template.exercises, start=1):
-            ex_sets = sets_by_exercise.get(te.exercise_id, [])
-            set_numbers = sorted({s.set_number for s in ex_sets})
+            ex_sets = sets_by_exercise.get(te.exercise_id or 0, [])
+            set_numbers = sorted({s.set_number or 0 for s in ex_sets})
             dummy_exercises.append(make_dummy(te.exercise, set_numbers, order_idx))
     else:
         # No template: fall back to the exercises that have sets, ordered
         # by their earliest set.
         first_seen: list[int] = []
-        for se in sorted(sess.sets, key=lambda s: s.set_number):
+        for se in sorted(sess.sets, key=lambda s: s.set_number or 0):
+            if se.exercise_id is None:
+                continue
             if se.exercise_id not in first_seen:
                 first_seen.append(se.exercise_id)
         for order_idx, ex_id in enumerate(first_seen, start=1):
@@ -734,7 +701,7 @@ async def edit_session_form(session_id: int, request: Request, user: models.User
             # after a middle set was deleted), plus one blank row so new
             # sets can be added. Renumbering here would shift data onto
             # the wrong set.
-            set_numbers = sorted({s.set_number for s in ex_sets})
+            set_numbers = sorted({s.set_number or 0 for s in ex_sets})
             dummy_exercises.append(make_dummy(ex_sets[0].exercise, set_numbers, order_idx))
     dummy_template = DummyTemplate(sess.template_id, dummy_exercises)
 
@@ -754,7 +721,7 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
         raise HTTPException(status_code=404, detail="Session not found")
 
     form = await request.form()
-    date_str = form.get("date")
+    date_str = _form_str(form.get("date"))
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
     try:
@@ -763,7 +730,7 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
         raise HTTPException(status_code=400, detail="Invalid date")
     # Template is chosen at creation time and is not editable from here, so
     # sess.template_id is intentionally left untouched.
-    sess.notes = form.get("notes") or None
+    sess.notes = _form_str(form.get("notes")) or None
 
     # Collect all (exercise_id, set_number) tuples being submitted.
     submitted_pairs = set()
@@ -785,8 +752,8 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
 
     # Upsert submitted rows.
     for ex_id, set_num in submitted_pairs:
-        reps_val = form.get(f"reps-{ex_id}-{set_num}", "")
-        weight_val = form.get(f"weight-{ex_id}-{set_num}", "")
+        reps_val = _form_str(form.get(f"reps-{ex_id}-{set_num}", ""))
+        weight_val = _form_str(form.get(f"weight-{ex_id}-{set_num}", ""))
 
         try:
             reps = int(reps_val) if reps_val else 0
@@ -857,7 +824,7 @@ async def cardio_create(
     db: Session = Depends(get_db),
 ):
     form = await request.form()
-    activity_type = (form.get("activity_type") or "").strip().lower()
+    activity_type = (_form_str(form.get("activity_type")) or "").strip().lower()
     if not activity_type:
         raise HTTPException(status_code=400, detail="activity_type is required")
     if activity_type not in CARDIO_ACTIVITY_TYPES:
@@ -874,9 +841,9 @@ async def cardio_create(
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="invalid numeric value")
 
-    distance_km = _to_float(form.get("distance_km"))
+    distance_km = _to_float(_form_str(form.get("distance_km")))
     try:
-        duration_min = _parse_duration_min(form.get("duration_min"))
+        duration_min = _parse_duration_min(_form_str(form.get("duration_min")))
     except ValueError:
         raise HTTPException(status_code=400, detail="duration must be minutes (e.g. 45) or M:SS (e.g. 44:51)")
     if distance_km is not None and distance_km < 0:
@@ -886,7 +853,7 @@ async def cardio_create(
     if (distance_km is None or distance_km == 0) and duration_min is None:
         raise HTTPException(status_code=400, detail="enter a distance or a duration")
 
-    date_str = form.get("date") or date.today().isoformat()
+    date_str = _form_str(form.get("date")) or date.today().isoformat()
     try:
         activity_date = date.fromisoformat(date_str)
     except ValueError:
@@ -907,7 +874,7 @@ async def cardio_create(
         activity_type=activity_type,
         distance_km=distance_km,
         duration_min=duration_min,
-        notes=form.get("notes") or None,
+        notes=_form_str(form.get("notes")) or None,
     ))
     db.commit()
     return RedirectResponse(url="/cardio?created=1", status_code=303)
@@ -940,7 +907,7 @@ async def cardio_update(
         raise HTTPException(status_code=404, detail="Cardio activity not found")
 
     form = await request.form()
-    activity_type = (form.get("activity_type") or "").strip().lower()
+    activity_type = (_form_str(form.get("activity_type")) or "").strip().lower()
     if not activity_type:
         raise HTTPException(status_code=400, detail="activity_type is required")
     if activity_type not in CARDIO_ACTIVITY_TYPES:
@@ -957,9 +924,9 @@ async def cardio_update(
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="invalid numeric value")
 
-    distance_km = _to_float(form.get("distance_km"))
+    distance_km = _to_float(_form_str(form.get("distance_km")))
     try:
-        duration_min = _parse_duration_min(form.get("duration_min"))
+        duration_min = _parse_duration_min(_form_str(form.get("duration_min")))
     except ValueError:
         raise HTTPException(status_code=400, detail="duration must be minutes (e.g. 45) or M:SS (e.g. 44:51)")
     if distance_km is not None and distance_km < 0:
@@ -969,7 +936,7 @@ async def cardio_update(
     if (distance_km is None or distance_km == 0) and duration_min is None:
         raise HTTPException(status_code=400, detail="enter a distance or a duration")
 
-    date_str = form.get("date") or c.session.date.isoformat()
+    date_str = _form_str(form.get("date")) or (c.session.date.isoformat() if c.session and c.session.date else date.today().isoformat())
     try:
         activity_date = date.fromisoformat(date_str)
     except ValueError:
@@ -990,7 +957,7 @@ async def cardio_update(
     c.activity_type = activity_type
     c.distance_km = distance_km
     c.duration_min = duration_min
-    c.notes = form.get("notes") or None
+    c.notes = _form_str(form.get("notes")) or None
     # Moving the activity to another date can leave its previous auto-created
     # session empty; prune it so /sessions doesn't accumulate orphan rows.
     _prune_empty_session(db, old_session)
@@ -1046,12 +1013,12 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
         if weighted_sets:
             has_weight = True
             top_weight = max((s.weight or 0.0) for s in weighted_sets)
-            volume = sum((s.weight or 0.0) * s.reps for s in weighted_sets)
+            volume = sum((s.weight or 0.0) * (s.reps or 0) for s in weighted_sets)
         elif bw_sets:
             # Bodyweight exercise with no added weight – use reps as metric.
             has_weight = True
             top_weight = 0.0
-            volume = sum(s.reps for s in bw_sets)  # use volume column for total reps when BW
+            volume = sum(s.reps or 0 for s in bw_sets)  # use volume column for total reps when BW
         else:
             # Weighted exercise whose sets were logged without a weight
             # (e.g. weight forgotten). Keep the session visible in history
@@ -1075,7 +1042,7 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
             eff_top = 0.0
             est_1rm = 0.0
 
-        total_reps = sum(s.reps for s in sets)
+        total_reps = sum(s.reps or 0 for s in sets)
         rows.append({
             "date": str(sess.date),
             "top_weight": round(top_weight, 2),
@@ -1108,7 +1075,7 @@ async def api_list_templates(user: models.User = Depends(get_current_user), db: 
             "exercises": [
                 {
                     "exercise_id": te.exercise_id,
-                    "name": te.exercise.name,
+                    "name": te.exercise.name if te.exercise else "",
                     "sets": te.sets,
                     "order": te.order,
                 }
@@ -1168,7 +1135,7 @@ async def api_get_session(
         "sets": [
             {
                 "exercise_id": s.exercise_id,
-                "exercise": s.exercise.name,
+                "exercise": s.exercise.name if s.exercise else "",
                 "set_number": s.set_number,
                 "reps": s.reps,
                 "weight": s.weight,
@@ -1176,38 +1143,6 @@ async def api_get_session(
             for s in sets
         ],
         "cardio": [_cardio_json(c) for c in sess.cardio],
-    }
-
-
-# ── Cardio helpers ────────────────────────────────────────────────────────────
-
-def _cardio_pace_unit(c: models.CardioActivity) -> str:
-    """Distance unit the pace is expressed against (swimming: per 100 m)."""
-    return "100m" if (c.activity_type or "").lower() == "swimming" else "km"
-
-
-def _cardio_pace(c: models.CardioActivity) -> Optional[float]:
-    """Minutes per pace unit (per km, or per 100 m for swimming), or None
-    when we lack the distance or duration."""
-    if not c.distance_km or not c.duration_min:
-        return None
-    if c.distance_km <= 0:
-        return None
-    if _cardio_pace_unit(c) == "100m":
-        return round(c.duration_min / (c.distance_km * 10), 2)
-    return round(c.duration_min / c.distance_km, 2)
-
-
-def _cardio_json(c: models.CardioActivity) -> dict:
-    return {
-        "id": c.id,
-        "session_id": c.session_id,
-        "activity_type": c.activity_type,
-        "distance_km": c.distance_km,
-        "duration_min": c.duration_min,
-        "pace": _cardio_pace(c),
-        "pace_unit": _cardio_pace_unit(c),
-        "notes": c.notes,
     }
 
 
@@ -1227,7 +1162,10 @@ async def api_list_cardio(
         .limit(limit)
         .all()
     )
-    return [dict(_cardio_json(c), date=str(c.session.date)) for c in rows]
+    return [
+        dict(_cardio_json(c), date=str(c.session.date if c.session else ""))
+        for c in rows
+    ]
 
 
 @app.get("/api/cardio/{cardio_id}")
@@ -1239,7 +1177,7 @@ async def api_get_cardio(
     c = db.get(models.CardioActivity, cardio_id)
     if not c:
         raise HTTPException(status_code=404, detail="Cardio activity not found")
-    return dict(_cardio_json(c), date=str(c.session.date))
+    return dict(_cardio_json(c), date=str(c.session.date if c.session else ""))
 
 
 @app.post("/api/cardio")
@@ -1260,7 +1198,9 @@ async def api_create_cardio(
         get = lambda k, d=None: body.get(k, d)
     else:
         form = await request.form()
-        get = lambda k, d=None: form.get(k, d)
+        def get(k, d=None):
+            v = form.get(k, d)
+            return v if isinstance(v, str) else None
 
     activity_type = (get("activity_type") or "").strip().lower()
     if not activity_type:
@@ -1446,7 +1386,7 @@ async def import_plan(
     db: Session = Depends(get_db),
 ):
     form = await request.form()
-    plan_id = form.get("plan_id")
+    plan_id = _form_str(form.get("plan_id"))
 
     with open(STARTER_PLANS_PATH) as f:
         plans = json.load(f)

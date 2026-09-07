@@ -10,6 +10,14 @@ from app import models
 from app.auth import COOKIE_NAME, create_session_cookie
 
 
+def _one(qry):
+    """first() with a hard assert — pyright narrows the Optional away."""
+    row = qry.first()
+    assert row is not None
+    return row
+
+
+
 @pytest.fixture(scope="function")
 def client():
     # Create tables for the test database.
@@ -35,9 +43,9 @@ def _seed(client):
     client.post("/exercises", data={"name": "Pull Ups", "is_bodyweight": "1"})
     client.post("/templates", data={"name": "Upper Body"})
     db = SessionLocal()
-    bench = db.query(models.Exercise).filter_by(name="Bench Press").first()
-    pull = db.query(models.Exercise).filter_by(name="Pull Ups").first()
-    tpl = db.query(models.SessionTemplate).filter_by(name="Upper Body").first()
+    bench = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
+    pull = _one(db.query(models.Exercise).filter_by(name="Pull Ups"))
+    tpl = _one(db.query(models.SessionTemplate).filter_by(name="Upper Body"))
     db.add(models.SessionTemplateExercise(
         session_template_id=tpl.id, exercise_id=bench.id, sets=5, order=1))
     db.add(models.SessionTemplateExercise(
@@ -89,8 +97,8 @@ def test_api_templates(client):
     client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
     client.post("/templates", data={"name": "Upper Body"})
     db = SessionLocal()
-    bench = db.query(models.Exercise).filter_by(name="Bench Press").first()
-    tpl = db.query(models.SessionTemplate).filter_by(name="Upper Body").first()
+    bench = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
+    tpl = _one(db.query(models.SessionTemplate).filter_by(name="Upper Body"))
     db.add(models.SessionTemplateExercise(
         session_template_id=tpl.id, exercise_id=bench.id, sets=5, order=1))
     db.commit()
@@ -154,7 +162,7 @@ def test_create_session_json_for_api_clients(client):
 def test_create_session_browser_still_redirects(client):
     client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
     db = SessionLocal()
-    bench = db.query(models.Exercise).filter_by(name="Bench Press").first()
+    bench = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
     db.close()
     resp = client.post("/sessions/new", data={
         "date": date.today().isoformat(),
@@ -377,7 +385,7 @@ def test_dashboard_bodyweight_load_scaling(client):
 
     # Adding 10 kg (vest/belt) raises the pull-up set to (80 + 10) x 6 = 540.
     db = SessionLocal()
-    sess = db.query(models.WorkoutSession).filter_by(date=date(2026, 8, 25)).first()
+    sess = _one(db.query(models.WorkoutSession).filter_by(date=date(2026, 8, 25)))
     pull_set = [s for s in sess.sets if s.exercise_id == pull_id][0]
     pull_set.weight = 10
     db.commit()
