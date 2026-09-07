@@ -8,6 +8,7 @@ from typing import Generator, Optional
 import httpx
 import json
 import math
+from urllib.parse import urlsplit
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -116,6 +117,62 @@ with engine.begin() as conn:
 app = FastAPI(title="Training Log Dashboard")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(ai_router)
+
+
+# ── Security headers + CSRF Origin check ────────────────────────────────────
+#
+# One middleware covers both:
+#
+# * Every response gets Cache-Control: no-store (authenticated HTML: training
+#   data, chat history — shared caches/proxies must not retain it) and
+#   X-Frame-Options: DENY (a third-party page embedding this app in an
+#   invisible iframe is the clickjacking vector).
+#
+# * State-changing requests (POST/PUT/PATCH/DELETE) from browsers must carry
+#   an Origin or Referer header matching the Host. SameSite=lax already
+#   stops cross-site POSTs from carrying the session cookie, so this is
+#   defense-in-depth — it closes the gap if cookie settings are ever relaxed
+#   or a second user appears. Non-browser API clients (MCP, curl) send no
+#   Origin/Referer at all and are unaffected: the check only REJECTS when a
+#   cross-origin value is present.
+@app.middleware("http")
+async def security_headers_and_origin_check(request: Request, call_next):
+    method = request.method.upper()
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        origin = request.headers.get("origin", "")
+        referer = request.headers.get("referer", "")
+        host = request.headers.get("host", "")
+        if origin or referer:
+            src_host = ""
+            if origin:
+                try:
+                    src_host = urlsplit(origin).netloc
+                except ValueError:
+                    src_host = ""
+            if not src_host:
+                try:
+                    src_host = urlsplit(referer).netloc
+                except ValueError:
+                    src_host = ""
+            # Accept exact host match and the common proxy variants
+            # (X-Forwarded-Host behind Cloudflare/nginx, localhost:port).
+            fwd_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+            allowed = {host, fwd_host}
+            # Strip a :port from the request host for scheme-default matches.
+            if host and ":" in host:
+                allowed.add(host.rsplit(":", 1)[0])
+            if src_host and src_host not in allowed:
+                return JSONResponse(
+                    {"detail": "cross-origin request rejected"},
+                    status_code=403,
+                )
+    response = await call_next(request)
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    return response
+
+
 # Cache-buster for static assets: bumps on every app startup so proxies and
 # browsers re-fetch CSS/JS after a rebuild.
 STATIC_VERSION = str(int(time.time()))
