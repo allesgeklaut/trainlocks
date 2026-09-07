@@ -53,6 +53,22 @@ def _cardio_load_factor(activity_type: str) -> float:
     return CARDIO_LOAD_FACTOR.get((activity_type or "").lower(), CARDIO_LOAD_DEFAULT_FACTOR)
 
 
+def _ai_duration_value(minutes) -> str:
+    """Prefill for the AI review form's duration input ('45' or '43:34').
+
+    Lives on the templates env as a global so ai_session_review.html can
+    format decimal minutes the same way cardio_edit.html does.
+    """
+    if minutes is None:
+        return ""
+    total = round(float(minutes) * 60)
+    m, s = divmod(total, 60)
+    return str(m) if s == 0 else f"{m}:{s:02d}"
+
+
+templates.env.globals["_ai_duration_value"] = _ai_duration_value
+
+
 def _parse_duration_min(value) -> float | None:
     """Parse a form duration: minutes ('45', '44.85') or M:SS / H:MM:SS ('44:51').
 

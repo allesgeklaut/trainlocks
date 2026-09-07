@@ -18,7 +18,6 @@
 {% endif %}
 
 <form method="post" action="/sessions/ai/save" data-suppress-enter hx-boost="false" style="max-width:560px">
-  <input type="hidden" name="template_id" value="" />
 
   <div class="card">
     <div class="card-title">Session Details</div>
@@ -70,6 +69,10 @@
     </p>
     {% for c in ai_cardio %}
     <div class="ai-cardio-entry">
+      <!-- Hidden fallback: unchecked checkboxes are not submitted, so the
+           server keys the cardio loop off the always-submitted -type select
+           and reads this value to decide inclusion. -->
+      <input type="hidden" name="cardio-{{ loop.index0 }}-include" value="" />
       <label class="ai-cardio-check">
         <input type="checkbox" name="cardio-{{ loop.index0 }}-include" value="1" checked />
         <strong>{{ c.activity_type }}</strong>
@@ -89,7 +92,7 @@
         </label>
         <label>
           <span>Duration (min or H:MM:SS)</span>
-          <input type="text" name="cardio-{{ loop.index0 }}-duration" value="{{ '%g'|format(c.duration_min) if c.duration_min is not none else '' }}" placeholder="—" />
+          <input type="text" name="cardio-{{ loop.index0 }}-duration" value="{{ _ai_duration_value(c.duration_min) }}" placeholder="—" />
         </label>
       </div>
       {% if c.notes %}
@@ -162,7 +165,7 @@
 
   // Save-confirm guard: warn when a weighted exercise has reps but no weight.
   (function () {
-    var form = document.querySelector('form[action="/sessions/new"]');
+    var form = document.querySelector('form[action="/sessions/ai/save"]');
     if (!form) return;
     form.addEventListener('submit', function (e) {
       var missing = [];

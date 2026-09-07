@@ -9,14 +9,17 @@
   <link rel="mask-icon" href="/static/favicon.svg" color="#cd7f32" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="trainlocks" />
-  <link rel="preconnect" href="https://api.fontshare.com" />
-  <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&f[]=jetbrains-mono@400,500,600,700&display=swap" rel="stylesheet" />
+  <!-- Fonts: vendored (was api.fontshare.com CSS + cdn.fontshare.com files)
+       so no third-party origin is contacted at page load. -->
+  <link rel="stylesheet" href="/static/fonts/fonts.css?v={{ static_version }}" />
   <link rel="stylesheet" href="/static/style.css?v={{ static_version }}" />
   <meta name="theme-color" content="#0b0d12" />
   <link rel="mask-icon" href="/static/favicon.svg" color="#e94560" />
   <title>{% block title %}Trainlocks{% endblock %}</title>
   {% block styles %}{% endblock %}
-  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+  <!-- htmx: vendored (was cdn.jsdelivr) so the whole JS supply chain is
+       served from /static — a CDN compromise can't inject code here. -->
+  <script src="/static/js/htmx.min.js?v={{ static_version }}"></script>
   <!-- Markdown libs for the AI-coach chat (see coach.html). They must live
        here in <head>, not in a page's scripts block: htmx boosted swaps
        re-insert page scripts as a fragment, and dynamically inserted
@@ -25,8 +28,19 @@
        coach page rendered unformatted on first open, fine on refresh).
        In <head> they're parser-blocking on full loads and already global on
        boosted swaps (the fragment never re-sends <head>). -->
-  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <!-- Markdown libs for the AI-coach chat (see coach.html). Vendored into
+       /static (not a CDN): they sanitize all LLM output that gets
+       innerHTML'd, so a compromised CDN or supply-chain swap would become a
+       stored-XSS vector inside the app. They must live here in <head>, not
+       in a page's scripts block: htmx boosted swaps re-insert page scripts
+       as a fragment, and dynamically inserted <script src> tags load
+       asynchronously — an inline page script would run before these libs
+       land and silently fall back to plain text (the coach page rendered
+       unformatted on first open, fine on refresh). In <head> they're
+       parser-blocking on full loads and already global on boosted swaps
+       (the fragment never re-sends <head>). -->
+  <script src="/static/js/marked.min.js?v={{ static_version }}"></script>
+  <script src="/static/js/purify.min.js?v={{ static_version }}"></script>
 </head>
 
 <body hx-boost="true" hx-target="#app-shell" hx-swap="outerHTML" hx-indicator="#boost-indicator">

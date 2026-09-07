@@ -45,7 +45,10 @@ def llm_state(tmp_path, monkeypatch):
     monkeypatch.setattr(
         llm_mod, "_LLM_BACKENDS_RAW",
         json.dumps([{"name": "fake", "type": "openai",
-                     "url": "http://fake.local", "model": "fake-vision"}]),
+                     # 127.0.0.1:1 — closed port: connects/fails instantly.
+                     # An unresolvable .local host would hang ~10s per call
+                     # (httpx's connect timeout does not bound getaddrinfo).
+                     "url": "http://127.0.0.1:1", "model": "fake-vision"}]),
     )
     monkeypatch.setattr(llm_mod, "_LLM_ENABLED", True)
     return state_file
@@ -75,9 +78,31 @@ class TestLLMConfig:
 
     def test_unknown_backend_rejected(self, llm_state):
         import anyio
-        import pytest as _pytest
-        with _pytest.raises(ValueError):
+        with pytest.raises(ValueError):
             anyio.run(llm_mod.select_backend, "nope")
+
+    def test_invalid_backend_entry_redacts_api_key(self, llm_state, caplog):
+        """A malformed LLM_BACKENDS entry that carries an inline api_key must
+        not leak the key into the log (it lands in container logs)."""
+        import anyio as _anyio
+        import logging as _logging
+        monkeypatched_raw = json.dumps([
+            {"name": "", "type": "openai", "url": "http://x",
+             "api_key": "sk-SUPERSECRET-123"},
+        ])
+        llm_mod._LLM_BACKENDS_RAW = monkeypatched_raw
+        try:
+            with caplog.at_level(_logging.WARNING, logger="trainlocks.llm"):
+                backends = _anyio.run(llm_mod.list_backends)
+        finally:
+            llm_mod._LLM_BACKENDS_RAW = json.dumps([
+                {"name": "fake", "type": "openai",
+                 "url": "http://127.0.0.1:1", "model": "fake-vision"}])
+        assert backends == [] or all(b.get("name") != "" for b in backends)
+        leaked = [r for r in caplog.records if "sk-SUPERSECRET-123" in r.getMessage()]
+        assert not leaked, "api_key must be redacted in invalid-backend logs"
+        assert any("Skipping invalid LLM backend entry" in r.getMessage()
+                   for r in caplog.records)
 
     def test_extract_content_openai_shape(self, llm_state):
         text, reasoning, model = llm_mod._extract_content(
@@ -328,8 +353,8 @@ class TestExtraction:
             files={"screenshot": ("shot.png", png.encode(), "image/png")},
         )
         assert r.status_code == 200
-        # Review form is prefilled with AI values and posts to /sessions/new.
-        assert 'action="/sessions/new"' in r.text
+        # Review form posts to the AI save route (NOT /sessions/new).
+        assert 'action="/sessions/ai/save"' in r.text
         assert 'value="2026-09-03"' in r.text
         assert "Felt strong" in r.text
         assert "Brand New Machine" in r.text
@@ -392,7 +417,75 @@ class TestExtraction:
             "/sessions/ai/extract",
             files={"screenshot": ("shot.png", png.encode(), "image/png")},
         )
-        assert r.status_code == 502
+        # 200 + rendered error (not 502): a 5xx would be swallowed by
+        # Cloudflare's own error page before the user could read the hint.
+        assert r.status_code == 200
+        assert "Could not parse the AI response as JSON" in r.text
+        assert 'action="/sessions/ai/extract"' in r.text
+
+    def test_extract_non_object_json_renders_error(self, client, llm_state, monkeypatch):
+        """A list/int reply must not crash the route with a 500."""
+        async def fake_chat(messages, **kw):
+            return {"text": "[1, 2, 3]", "backend": "fake",
+                    "model": "m", "reasoning": ""}
+
+        monkeypatch.setattr(llm_mod, "chat", fake_chat)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+        )
+        assert r.status_code == 200
+        assert "not a JSON object" in r.text
+
+    def test_extract_hostile_shapes_no_500(self, client, llm_state, monkeypatch):
+        """Exercises/sets/cardio items that aren't dicts, and names that
+        normalize to nothing, must be skipped — never AttributeError/KeyError."""
+        llm_json = json.dumps({
+            "date": "2026-09-03",
+            "exercises": [
+                {"Bench": "3x8"},                      # non-dict exercise item
+                {"name": "!!!", "sets": [1, 2]},       # symbols-only name, junk sets
+                {"name": "Bench Press", "sets": ["5x100", {"reps": 5, "weight_kg": 60}]},
+            ],
+            "cardio": ["junk", {"activity_type": "running", "distance_km": 5}],
+            "notes": "ok",
+        })
+
+        async def fake_chat(messages, **kw):
+            return {"text": llm_json, "backend": "fake",
+                    "model": "m", "reasoning": ""}
+
+        monkeypatch.setattr(llm_mod, "chat", fake_chat)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+        )
+        assert r.status_code == 200
+        assert "Bench Press" in r.text
+        assert "running" in r.text  # the dict cardio entry survived
+        # Only the valid set made it into the review form.
+        db = SessionLocal()
+        ex = db.query(models.Exercise).filter_by(name="Bench Press").first()
+        assert ex is not None
+
+    def test_extract_no_backend_renders_error(self, client, llm_state, monkeypatch):
+        """LLM on but nothing configured: say so instead of a misleading
+        'could not parse JSON' (chat() returns prose in that case)."""
+        monkeypatch.setattr(llm_mod, "_LLM_BACKENDS_RAW", "")
+        monkeypatch.setattr(llm_mod, "_OLLAMA_MODEL", "")
+        async def fake_current_backend():
+            return {}
+
+        monkeypatch.setattr(llm_mod, "current_backend", fake_current_backend)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+        )
+        assert r.status_code == 200
+        assert "No LLM backend configured" in r.text
 
     def test_upload_page_renders(self, client, llm_state):
         r = client.get("/sessions/ai")
@@ -498,8 +591,94 @@ class TestAiSessionSave:
         assert len(sess.cardio) == 1
         assert sess.cardio[0].activity_type == "swimming"
 
+    def test_save_unchecked_first_cardio_keeps_later_checked(self, client, llm_state):
+        """Regression: unchecking cardio #0 must not silently drop checked
+        entry #1 (unchecked checkboxes aren't submitted; the loop must key
+        off the always-submitted -type select)."""
+        r = client.post("/sessions/ai/save", data={
+            "date": "2026-09-05",
+            "notes": "",
+            # entry 0 UNCHECKED (checkbox absent, as real browsers submit;
+            # the hidden fallback posts an empty value)
+            "cardio-0-type": "running",
+            "cardio-0-distance": "5",
+            "cardio-0-duration": "30",
+            # entry 1 CHECKED
+            "cardio-1-include": "1",
+            "cardio-1-type": "cycling",
+            "cardio-1-distance": "20",
+            "cardio-1-duration": "60",
+        }, follow_redirects=False)
+        assert r.status_code == 303
+        assert "cardio=1" in r.headers["location"]
+        db = SessionLocal()
+        sess = db.query(models.WorkoutSession).filter_by(date=date(2026, 9, 5)).first()
+        assert sess is not None
+        assert len(sess.cardio) == 1
+        assert sess.cardio[0].activity_type == "cycling"
+
     def test_extraction_prompt_includes_today(self, client, llm_state):
         """The extraction prompt embeds today's date so partial dates resolve."""
         prompt = _extraction_system_prompt()
         assert "Today is" in prompt
         assert date.today().isoformat() in prompt
+
+    def test_review_page_save_guard_targets_correct_form(self, client, llm_state, monkeypatch):
+        """The 'reps but no weight' confirm must bind to the review form —
+        the selector used to point at /sessions/new (dead code)."""
+        llm_json = json.dumps({
+            "date": None,
+            "exercises": [{"name": "Bench Press",
+                           "sets": [{"reps": 10, "weight_kg": 60}]}],
+            "cardio": [], "notes": None,
+        })
+
+        async def fake_chat(messages, **kw):
+            return {"text": llm_json, "backend": "fake",
+                    "model": "fake-vision", "reasoning": ""}
+
+        monkeypatch.setattr(llm_mod, "chat", fake_chat)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+        )
+        assert r.status_code == 200
+        assert 'form[action="/sessions/ai/save"]' in r.text
+        assert 'form[action="/sessions/new"]' not in r.text
+
+    def test_coach_stream_malformed_json_body_is_400(self, client, llm_state):
+        r = client.post("/coach/send/stream",
+                        content=b"{not json",
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code == 400
+
+    def test_llm_select_malformed_json_body_is_400(self, client, llm_state):
+        r = client.post("/api/llm/select",
+                        content=b"[1,2,3",
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code == 400
+
+    def test_review_page_duration_prefill_is_mss(self, client, llm_state, monkeypatch):
+        """43.5667 min prefills as '43:34', not a raw float (matches
+        cardio_edit.html's input format)."""
+        llm_json = json.dumps({
+            "date": None, "exercises": [],
+            "cardio": [{"activity_type": "running", "distance_km": 6.39,
+                        "duration_min": 43.566666}],
+            "notes": None,
+        })
+
+        async def fake_chat(messages, **kw):
+            return {"text": llm_json, "backend": "fake",
+                    "model": "fake-vision", "reasoning": ""}
+
+        monkeypatch.setattr(llm_mod, "chat", fake_chat)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+        )
+        assert r.status_code == 200
+        assert 'value="43:34"' in r.text
+        assert "43.5667" not in r.text

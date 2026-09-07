@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import text as sa_text, func, Boolean
 
@@ -51,8 +50,6 @@ from .database import Base, SessionLocal, engine
 from .web import (
     BODYWEIGHT_DEFAULT_KG,
     CARDIO_ACTIVITY_TYPES,
-    CARDIO_LOAD_DEFAULT_FACTOR,
-    CARDIO_LOAD_FACTOR,
     _cardio_json,
     _cardio_load_factor,
     _cardio_pace,
@@ -97,8 +94,9 @@ with engine.begin() as conn:
     except Exception:
         pass
     # coach_chat_messages backs the AI fitness-coach chat history; create_all
-    # only covers it on fresh databases, existing volumes need the explicit
-    # CREATE (create_all never adds tables to a pre-existing DB file).
+    # DOES add missing tables to existing DBs, but an explicit idempotent
+    # CREATE keeps this migration block self-contained and matches the
+    # cardio-table pattern above.
     conn.execute(sa_text(
         """
         CREATE TABLE IF NOT EXISTS coach_chat_messages (
