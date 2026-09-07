@@ -10,10 +10,13 @@ import difflib
 import json
 import logging
 import re
+import secrets
+import threading
+import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.orm import Session
@@ -387,6 +390,82 @@ async def ai_session_page(
     return render_page(request, "ai_session.html", {"user": user})
 
 
+# ── PRG store for the extraction flow ────────────────────────────────────────
+#
+# POST /sessions/ai/extract used to render the review page directly, so a
+# browser refresh re-submitted the screenshot and re-ran the (paid, slow)
+# LLM extraction. Now the POST stashes the review payload in-memory under a
+# random token and 303-redirects to GET /sessions/ai/review?t=…, making
+# refresh/back a cheap GET. Single-user app: one module-level dict + lock is
+# plenty; entries expire after 30 min so screenshots don't linger forever.
+_REVIEW_TTL_SECONDS = 30 * 60
+_review_store: dict[str, tuple[float, dict[str, Any]]] = {}
+_review_store_lock = threading.Lock()
+
+
+def _review_store_put(payload: dict[str, Any]) -> str:
+    token = secrets.token_urlsafe(16)
+    now = time.monotonic()
+    with _review_store_lock:
+        # Opportunistic cleanup of expired entries.
+        for k in [k for k, (exp, _) in _review_store.items() if exp < now]:
+            del _review_store[k]
+        _review_store[token] = (now + _REVIEW_TTL_SECONDS, payload)
+    return token
+
+
+def _review_store_get(token: str) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _review_store_lock:
+        entry = _review_store.get(token)
+        if entry is None:
+            return None
+        expires, payload = entry
+        if expires < now:
+            del _review_store[token]
+            return None
+        return payload
+
+
+@router.get("/sessions/ai/review", response_class=HTMLResponse)
+async def ai_session_review_page(
+    request: Request,
+    t: str = Query(...),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """GET-render the review form for a stashed extraction result (PRG)."""
+    payload = _review_store_get(t)
+    if payload is None:
+        # Expired or unknown token — back to the upload page with a hint
+        # instead of an error page.
+        return render_page(request, "ai_session.html", {
+            "user": user,
+            "extract_error": ("This extraction result has expired. Please "
+                              "upload the screenshot again."),
+        })
+    # Re-fetch the exercises in this request's session so the template works
+    # with attached instances (an exercise deleted between POST and GET is
+    # skipped rather than 500ing).
+    review_exercises = []
+    for ex_id, is_new, sets in zip(
+        payload["exercise_ids"], payload["is_new_flags"], payload["set_lists"],
+    ):
+        ex = db.get(models.Exercise, ex_id)
+        if ex is None:
+            continue
+        review_exercises.append({"exercise": ex, "is_new": is_new, "sets": sets})
+    ctx = {
+        "review_exercises": review_exercises,
+        "created_names": payload["created_names"],
+        "ai_date": payload["ai_date"],
+        "ai_notes": payload["ai_notes"],
+        "ai_cardio": payload["ai_cardio"],
+        "model_label": payload["model_label"],
+    }
+    return render_page(request, "ai_session_review.html", {"user": user, **ctx})
+
+
 @router.post("/sessions/ai/extract", response_class=HTMLResponse)
 async def ai_session_extract(
     request: Request,
@@ -554,15 +633,24 @@ async def ai_session_extract(
             "notes": str(c.get("notes") or ""),
         })
 
-    return render_page(request, "ai_session_review.html", {
-        "user": user,
-        "review_exercises": review_exercises,
+    # PRG: stash the review payload and redirect. A browser refresh on the
+    # review page now re-runs a cheap GET (token lookup), not the paid LLM
+    # extraction. Exercise rows are stashed as ids — ORM instances would be
+    # detached from the route's session by the time the GET re-renders.
+    token = _review_store_put({
+        "exercise_ids": [re_["exercise"].id for re_ in review_exercises],
+        "is_new_flags": [re_["is_new"] for re_ in review_exercises],
+        "set_lists": [re_["sets"] for re_ in review_exercises],
         "created_names": created,
-        "ai_date": parsed_date,
+        "ai_date": parsed_date.isoformat(),
         "ai_notes": data.get("notes") or "",
         "ai_cardio": review_cardio,
         "model_label": await llm_mod.current_model_label(),
     })
+    return RedirectResponse(
+        url=f"/sessions/ai/review?t={token}",
+        status_code=303,
+    )
 
 
 @router.post("/sessions/ai/save")

@@ -360,7 +360,10 @@ class TestExtraction:
             "/sessions/ai/extract",
             files={"screenshot": ("shot.png", png.encode(), "image/png")},
         )
-        assert r.status_code == 200
+        # PRG: the POST 303-redirects to a GET-rendered review page.
+        assert r.status_code == 200  # TestClient follows the redirect
+        assert r.history and r.history[0].status_code == 303
+        assert "/sessions/ai/review?t=" in str(r.url)
         # Review form posts to the AI save route (NOT /sessions/new).
         assert 'action="/sessions/ai/save"' in r.text
         assert 'value="2026-09-03"' in r.text
@@ -689,3 +692,123 @@ class TestAiSessionSave:
         assert r.status_code == 200
         assert 'value="43:34"' in r.text
         assert "43.5667" not in r.text
+
+
+# ---------------------------------------------------------------------------
+# Hardening: PRG extraction, security headers, CSRF origin check
+# ---------------------------------------------------------------------------
+
+class TestExtractionPRG:
+    def test_extract_redirects_to_review_get(self, client, llm_state, monkeypatch):
+        """POST /sessions/ai/extract must 303 to a token GET — refresh on the
+        review page re-runs a lookup, not the paid LLM extraction."""
+        llm_json = json.dumps({
+            "date": None,
+            "exercises": [{"name": "Bench Press",
+                           "sets": [{"reps": 10, "weight_kg": 60}]}],
+            "cardio": [], "notes": None,
+        })
+
+        calls = {"n": 0}
+
+        async def fake_chat(messages, **kw):
+            calls["n"] += 1
+            return {"text": llm_json, "backend": "fake",
+                    "model": "fake-vision", "reasoning": ""}
+
+        monkeypatch.setattr(llm_mod, "chat", fake_chat)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        location = r.headers["location"]
+        assert location.startswith("/sessions/ai/review?t=")
+        token = location.split("t=", 1)[1]
+
+        # The GET renders the form WITHOUT calling the LLM again.
+        r2 = client.get(location)
+        assert r2.status_code == 200
+        assert 'action="/sessions/ai/save"' in r2.text
+        assert calls["n"] == 1
+
+        # Refreshing (same GET) still works, still no extra LLM call.
+        r3 = client.get(location)
+        assert r3.status_code == 200
+        assert calls["n"] == 1
+
+    def test_review_token_unknown_or_expired(self, client, llm_state):
+        r = client.get("/sessions/ai/review?t=bogus-token")
+        assert r.status_code == 200
+        assert "expired" in r.text
+        assert 'action="/sessions/ai/extract"' in r.text  # upload form back
+
+    def test_review_token_expires_after_ttl(self, client, llm_state, monkeypatch):
+        import time as _time
+        from app import ai as ai_mod
+        llm_json = json.dumps({"date": None, "exercises": [],
+                               "cardio": [], "notes": None})
+
+        async def fake_chat(messages, **kw):
+            return {"text": llm_json, "backend": "fake",
+                    "model": "m", "reasoning": ""}
+
+        monkeypatch.setattr(llm_mod, "chat", fake_chat)
+        png = base64.b64encode(b"\x89PNG fake").decode()
+        r = client.post(
+            "/sessions/ai/extract",
+            files={"screenshot": ("shot.png", png.encode(), "image/png")},
+            follow_redirects=False,
+        )
+        token = r.headers["location"].split("t=", 1)[1]
+        assert client.get(r.headers["location"]).status_code == 200
+
+        # Age the entry past the TTL.
+        expired = _time.monotonic() - 1
+        with ai_mod._review_store_lock:
+            exp, payload = ai_mod._review_store[token]
+            ai_mod._review_store[token] = (exp - ai_mod._REVIEW_TTL_SECONDS - 1, payload)
+        r2 = client.get(r.headers["location"])
+        assert "expired" in r2.text
+
+
+class TestSecurityHeaders:
+    def test_html_response_headers(self, client, llm_state):
+        r = client.get("/coach")
+        assert r.headers.get("x-frame-options") == "DENY"
+        assert r.headers.get("cache-control") == "no-store"
+        assert r.headers.get("referrer-policy") == "same-origin"
+
+    def test_static_files_get_headers_too(self, client, llm_state):
+        r = client.get("/static/js/htmx.min.js")
+        assert r.status_code == 200
+        assert r.headers.get("x-frame-options") == "DENY"
+
+
+class TestCSRFOriginCheck:
+    def test_cross_origin_post_rejected(self, client, llm_state):
+        r = client.post("/api/llm/select", json={"backend": "fake"},
+                        headers={"Origin": "https://evil.example.com"})
+        assert r.status_code == 403
+
+    def test_cross_origin_referer_rejected(self, client, llm_state):
+        r = client.post("/sessions/ai/save", data={"date": "2026-09-05"},
+                        headers={"Referer": "https://evil.example.com/form"})
+        assert r.status_code == 403
+
+    def test_same_origin_post_allowed(self, client, llm_state):
+        r = client.post("/api/llm/select", json={"backend": "fake", "model": "other"},
+                        headers={"Origin": "http://testserver",
+                                 "Referer": "http://testserver/coach"})
+        assert r.status_code == 200
+
+    def test_no_origin_referer_is_unaffected(self, client, llm_state):
+        """API clients (MCP/curl) send no Origin/Referer — not blocked."""
+        r = client.post("/api/llm/select", json={"backend": "fake"})
+        assert r.status_code == 200
+
+    def test_get_never_blocked_by_cross_origin_header(self, client, llm_state):
+        r = client.get("/coach", headers={"Origin": "https://evil.example.com"})
+        assert r.status_code == 200
