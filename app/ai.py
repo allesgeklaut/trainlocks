@@ -23,6 +23,7 @@ from . import models
 from .auth import get_current_user, get_db
 from .web import (
     BODYWEIGHT_DEFAULT_KG,
+    _form_str,
     CARDIO_ACTIVITY_TYPES,
     _cardio_load_factor,
     _iso_week_key,
@@ -106,7 +107,8 @@ def _training_context(user: models.User, db: Session) -> str:
                 parts.append(" ".join(bits))
             line_txt = "; ".join(parts) if parts else "(no sets recorded)"
             notes = f" — {s.notes}" if s.notes else ""
-            lines.append(f"- {s.date.isoformat()}: {line_txt}{notes}")
+            session_date = s.date or date.today()
+            lines.append(f"- {session_date.isoformat()}: {line_txt}{notes}")
     else:
         lines.append("No sessions logged yet.")
 
@@ -118,7 +120,7 @@ def _training_context(user: models.User, db: Session) -> str:
     )
     weekly_load: dict[str, float] = {}
     for s in sessions_window:
-        key = _iso_week_key(s.date)
+        key = _iso_week_key(s.date or date.today())
         for se in s.sets:
             is_bw = bool(se.exercise and se.exercise.is_bodyweight)
             weight = (bodyweight + (se.weight or 0.0)) if is_bw else (se.weight or 0.0)
@@ -322,6 +324,14 @@ def _parse_json_loose(text: str) -> Any:
         raise
 
 
+def _coerce_float(v: Any) -> float | None:
+    """float(v) tolerating None/""/junk (LLM JSON values are untyped)."""
+    try:
+        return float(v) if v not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _norm_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
 
@@ -500,7 +510,7 @@ async def ai_session_extract(
             except (TypeError, ValueError):
                 reps = 0
             try:
-                weight = float(s.get("weight_kg")) if s.get("weight_kg") is not None else None
+                weight = _coerce_float(s.get("weight_kg"))
             except (TypeError, ValueError):
                 weight = None
             if reps == 0 and weight is None:
@@ -525,11 +535,11 @@ async def ai_session_extract(
         if not isinstance(c, dict):
             continue
         try:
-            dist = float(c.get("distance_km")) if c.get("distance_km") is not None else None
+            dist = _coerce_float(c.get("distance_km"))
         except (TypeError, ValueError):
             dist = None
         try:
-            dur = float(c.get("duration_min")) if c.get("duration_min") is not None else None
+            dur = _coerce_float(c.get("duration_min"))
         except (TypeError, ValueError):
             dur = None
         if dist is None and dur is None:
@@ -565,7 +575,7 @@ async def ai_session_save(
     any checked cardio activities (in one transaction), then redirects to the
     session list."""
     form = await request.form()
-    date_str = form.get("date")
+    date_str = _form_str(form.get("date"))
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
     try:
@@ -575,7 +585,7 @@ async def ai_session_save(
 
     workout = models.WorkoutSession(
         date=workout_date,
-        notes=form.get("notes") or None,
+        notes=_form_str(form.get("notes")) or None,
     )
     db.add(workout)
     db.flush()
@@ -590,9 +600,9 @@ async def ai_session_save(
             set_num = int(set_num_str)
         except (ValueError, IndexError):
             continue
-        weight_val = form.get(f"weight-{ex_id}-{set_num}")
+        weight_val = _form_str(form.get(f"weight-{ex_id}-{set_num}"))
         try:
-            reps = int(value) if value else 0
+            reps = int(_form_str(value)) if _form_str(value) else 0
         except ValueError:
             reps = 0
         try:
@@ -616,21 +626,15 @@ async def ai_session_save(
     cardio_saved = 0
     idx = 0
     while f"cardio-{idx}-type" in form:
-        include = form.get(f"cardio-{idx}-include") == "1"
+        include = _form_str(form.get(f"cardio-{idx}-include")) == "1"
         if include:
-            activity_type = (form.get(f"cardio-{idx}-type") or "other").strip().lower()
+            activity_type = (_form_str(form.get(f"cardio-{idx}-type")) or "other").strip().lower()
             if activity_type not in CARDIO_ACTIVITY_TYPES:
                 activity_type = "other"
 
-            def _to_float(v):
-                try:
-                    return float(v) if v not in (None, "") else None
-                except (TypeError, ValueError):
-                    return None
-
-            distance_km = _to_float(form.get(f"cardio-{idx}-distance"))
+            distance_km = _coerce_float(form.get(f"cardio-{idx}-distance"))
             try:
-                duration_min = _parse_duration_min(form.get(f"cardio-{idx}-duration"))
+                duration_min = _parse_duration_min(_form_str(form.get(f"cardio-{idx}-duration")))
             except ValueError:
                 duration_min = None
             if distance_km is not None and distance_km < 0:
@@ -643,7 +647,7 @@ async def ai_session_save(
                     activity_type=activity_type,
                     distance_km=distance_km,
                     duration_min=duration_min,
-                    notes=form.get(f"cardio-{idx}-notes") or None,
+                    notes=_form_str(form.get(f"cardio-{idx}-notes")) or None,
                 ))
                 cardio_saved += 1
         idx += 1

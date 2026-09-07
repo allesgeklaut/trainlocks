@@ -49,6 +49,18 @@ def render_page(request: Request, template_name: str, context: dict,
                                       status_code=status_code)
 
 
+def _form_str(value) -> str:
+    """Coerce a starlette form value to ``str``.
+
+    ``request.form()`` values are typed ``str | UploadFile``; every textual
+    field caller narrows with this helper (an UploadFile can only arrive for
+    a file input, never for the text fields these routes read).
+    """
+    if isinstance(value, str):
+        return value
+    return ""
+
+
 def _cardio_load_factor(activity_type: str) -> float:
     return CARDIO_LOAD_FACTOR.get((activity_type or "").lower(), CARDIO_LOAD_DEFAULT_FACTOR)
 
@@ -97,9 +109,13 @@ def _parse_duration_min(value) -> float | None:
         raise ValueError("invalid duration")
 
 
-def _iso_week_key(d: date) -> str:
-    """Canonical chart bucket key for a date, e.g. '2026-W36' (ISO, Monday-aligned)."""
-    iso = d.isocalendar()
+def _iso_week_key(d: date | None) -> str:
+    """Canonical chart bucket key for a date, e.g. '2026-W36' (ISO, Monday-aligned).
+
+    Accepts ``None`` (unset session date → epoch bucket) so callers iterating
+    ORM rows don't need their own guard.
+    """
+    iso = (d or date(1970, 1, 5)).isocalendar()  # 1970-01-05 is a Monday
     return f"{iso[0]}-W{iso[1]:02d}"
 
 
