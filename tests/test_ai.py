@@ -22,6 +22,14 @@ from app.database import Base, SessionLocal, engine
 from app.main import app
 
 
+def _one(qry):
+    """first() with a hard assert — pyright narrows the Optional away."""
+    row = qry.first()
+    assert row is not None
+    return row
+
+
+
 @pytest.fixture(scope="function")
 def client():
     Base.metadata.create_all(bind=engine)
@@ -315,7 +323,7 @@ class TestExtraction:
         mapping, created = _match_or_create_exercises(db, ["Cable Row"])
         db.commit()
         assert created == ["Cable Row"]
-        ex = db.query(models.Exercise).filter_by(name="Cable Row").first()
+        ex = _one(db.query(models.Exercise).filter_by(name="Cable Row"))
         assert ex is not None
         assert ex.is_bodyweight is False
 
@@ -323,7 +331,7 @@ class TestExtraction:
         db = SessionLocal()
         _match_or_create_exercises(db, ["Handstand Push Up"])
         db.commit()
-        ex = db.query(models.Exercise).filter_by(name="Handstand Push Up").first()
+        ex = _one(db.query(models.Exercise).filter_by(name="Handstand Push Up"))
         assert ex.is_bodyweight is True
 
     def test_extract_route(self, client, llm_state, monkeypatch):
@@ -362,7 +370,7 @@ class TestExtraction:
 
         # The new exercise was committed for the review form.
         db = SessionLocal()
-        ex = db.query(models.Exercise).filter_by(name="Brand New Machine").first()
+        ex = _one(db.query(models.Exercise).filter_by(name="Brand New Machine"))
         assert ex is not None
 
     def test_extract_route_full_flow_to_session(self, client, llm_state, monkeypatch):
@@ -388,14 +396,14 @@ class TestExtraction:
         assert r.status_code == 200
 
         db = SessionLocal()
-        ex = db.query(models.Exercise).filter_by(name="Bench Press").first()
+        ex = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
         r = client.post("/sessions/new", data={
             "date": "2026-09-04", "template_id": "",
             "notes": "from AI",
             f"reps-{ex.id}-1": "10", f"weight-{ex.id}-1": "60",
         }, follow_redirects=False)
         assert r.status_code == 303
-        sess = db.query(models.WorkoutSession).filter_by(notes="from AI").first()
+        sess = _one(db.query(models.WorkoutSession).filter_by(notes="from AI"))
         assert sess is not None
         assert sess.sets[0].weight == 60.0
 
@@ -467,7 +475,7 @@ class TestExtraction:
         assert "running" in r.text  # the dict cardio entry survived
         # Only the valid set made it into the review form.
         db = SessionLocal()
-        ex = db.query(models.Exercise).filter_by(name="Bench Press").first()
+        ex = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
         assert ex is not None
 
     def test_extract_no_backend_renders_error(self, client, llm_state, monkeypatch):
@@ -562,15 +570,14 @@ class TestAiSessionSave:
         assert r.status_code == 303
         assert "/sessions/" in r.headers["location"] and "cardio=1" in r.headers["location"]
 
-        sess = db.query(models.WorkoutSession).filter_by(notes="AI saved session").first()
-        assert sess is not None
-        assert sess.date.isoformat() == "2026-09-02"
+        sess = _one(db.query(models.WorkoutSession).filter_by(notes="AI saved session"))
+        assert sess.date is not None and sess.date.isoformat() == "2026-09-02"
         assert sess.sets[0].weight == 50.0
         assert len(sess.cardio) == 1
         c = sess.cardio[0]
         assert c.activity_type == "running"
         assert c.distance_km == 6.39
-        assert abs(c.duration_min - 43.566666) < 0.01  # 43:34 parsed
+        assert c.duration_min is not None and abs(c.duration_min - 43.566666) < 0.01  # 43:34 parsed
         assert "Graz" in (c.notes or "")
 
     def test_save_session_cardio_only(self, client, llm_state):
@@ -586,7 +593,7 @@ class TestAiSessionSave:
         }, follow_redirects=False)
         assert r.status_code == 303
         db = SessionLocal()
-        sess = db.query(models.WorkoutSession).filter_by(date=date(2026, 9, 3)).first()
+        sess = _one(db.query(models.WorkoutSession).filter_by(date=date(2026, 9, 3)))
         assert sess is not None
         assert len(sess.cardio) == 1
         assert sess.cardio[0].activity_type == "swimming"
@@ -612,7 +619,7 @@ class TestAiSessionSave:
         assert r.status_code == 303
         assert "cardio=1" in r.headers["location"]
         db = SessionLocal()
-        sess = db.query(models.WorkoutSession).filter_by(date=date(2026, 9, 5)).first()
+        sess = _one(db.query(models.WorkoutSession).filter_by(date=date(2026, 9, 5)))
         assert sess is not None
         assert len(sess.cardio) == 1
         assert sess.cardio[0].activity_type == "cycling"

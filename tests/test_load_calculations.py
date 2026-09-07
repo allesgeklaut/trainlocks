@@ -11,6 +11,14 @@ from app.database import Base, SessionLocal, engine
 from app import models
 from app.auth import COOKIE_NAME, create_session_cookie
 
+
+def _one(qry):
+    """first() with a hard assert — pyright narrows the Optional away."""
+    row = qry.first()
+    assert row is not None
+    return row
+
+
 @pytest.fixture(scope="function")
 def client():
     # Create tables for the test database.
@@ -36,7 +44,7 @@ def test_load_calculations_with_varied_weights(client):
     client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
     # Retrieve the newly created exercise from the database.
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Bench Press" ).first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Bench Press" ))
     ex_id = ex.id
 
     # Create a session.
@@ -81,7 +89,7 @@ def test_progression_bodyweight_effective_load_and_1rm(client):
     client.post("/profile", data={"bodyweight": "70"})
     client.post("/exercises", data={"name": "Pull Ups", "is_bodyweight": "1"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Pull Ups").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Pull Ups"))
     ex_id = ex.id
 
     client.post("/sessions/new", data={
@@ -109,7 +117,7 @@ def test_bodyweight_no_weight_shows_rep_count(client):
     # Create body‑weight exercise.
     client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Push Ups" ).first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Push Ups" ))
     ex_id = ex.id
 
     # Create a session with reps but no weight.
@@ -140,7 +148,7 @@ def test_edit_form_pre_populates_reps_and_weight(client):
     # Create exercise and session.
     client.post("/exercises", data={"name": "Squat", "is_bodyweight": "0"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Squat").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Squat"))
     ex_id = ex.id
 
     payload = {
@@ -155,7 +163,7 @@ def test_edit_form_pre_populates_reps_and_weight(client):
     client.post("/sessions/new", data=payload)
 
     # Get the session ID.
-    sess = db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()).first()
+    sess = _one(db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()))
     session_id = sess.id
 
     # Open the edit form.
@@ -179,7 +187,7 @@ def test_edit_session_upserts_does_not_wipe_unrelated_rows(client):
     # Create exercise and session with 3 sets.
     client.post("/exercises", data={"name": "Deadlift", "is_bodyweight": "0"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Deadlift").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Deadlift"))
     ex_id = ex.id
 
     payload = {
@@ -194,7 +202,7 @@ def test_edit_session_upserts_does_not_wipe_unrelated_rows(client):
     }
     client.post("/sessions/new", data=payload)
 
-    sess = db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()).first()
+    sess = _one(db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()))
     session_id = sess.id
 
     # Edit: only update set 1 and 2, don't touch set 3.
@@ -217,25 +225,25 @@ def test_edit_session_upserts_does_not_wipe_unrelated_rows(client):
     assert len(sets) == 3
 
     # Verify sets 1 and 2 are updated.
-    s1 = db.query(models.SetEntry).filter(
+    s1 = _one(db.query(models.SetEntry).filter(
         models.SetEntry.session_id == session_id,
         models.SetEntry.set_number == 1
-    ).first()
+    ))
     assert s1.reps == 6
     assert s1.weight == 160.0
 
-    s2 = db.query(models.SetEntry).filter(
+    s2 = _one(db.query(models.SetEntry).filter(
         models.SetEntry.session_id == session_id,
         models.SetEntry.set_number == 2
-    ).first()
+    ))
     assert s2.reps == 6
     assert s2.weight == 160.0
 
     # Verify set 3 is unchanged.
-    s3 = db.query(models.SetEntry).filter(
+    s3 = _one(db.query(models.SetEntry).filter(
         models.SetEntry.session_id == session_id,
         models.SetEntry.set_number == 3
-    ).first()
+    ))
     assert s3.reps == 5
     assert s3.weight == 150.0
 
@@ -248,7 +256,7 @@ def test_edit_session_adds_new_set(client):
     # Create exercise and session with 1 set.
     client.post("/exercises", data={"name": "Leg Press", "is_bodyweight": "0"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Leg Press").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Leg Press"))
     ex_id = ex.id
 
     payload = {
@@ -259,7 +267,7 @@ def test_edit_session_adds_new_set(client):
     }
     client.post("/sessions/new", data=payload)
 
-    sess = db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()).first()
+    sess = _one(db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()))
     session_id = sess.id
 
     # Edit: keep set 1, and add a new set 2 (simulating the "Add set" button).
@@ -280,11 +288,10 @@ def test_edit_session_adds_new_set(client):
     sets = db.query(models.SetEntry).filter(models.SetEntry.session_id == session_id).all()
     assert len(sets) == 2
 
-    s2 = db.query(models.SetEntry).filter(
+    s2 = _one(db.query(models.SetEntry).filter(
         models.SetEntry.session_id == session_id,
         models.SetEntry.set_number == 2
-    ).first()
-    assert s2 is not None
+    ))
     assert s2.reps == 10
     assert s2.weight == 210.0
 
@@ -296,12 +303,12 @@ def test_template_session_skips_unfilled_exercises(client):
     client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
     client.post("/exercises", data={"name": "Rows", "is_bodyweight": "0"})
     db = SessionLocal()
-    bench = db.query(models.Exercise).filter_by(name="Bench Press").first()
-    rows = db.query(models.Exercise).filter_by(name="Rows").first()
+    bench = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
+    rows = _one(db.query(models.Exercise).filter_by(name="Rows"))
 
     # Create a template with both exercises, 3 sets each.
     client.post("/templates", data={"name": "Upper A"})
-    tpl = db.query(models.SessionTemplate).filter_by(name="Upper A").first()
+    tpl = _one(db.query(models.SessionTemplate).filter_by(name="Upper A"))
     client.post(f"/templates/{tpl.id}/add_exercise",
                 data={"exercise_id": bench.id, "sets": 3})
     client.post(f"/templates/{tpl.id}/add_exercise",
@@ -332,7 +339,7 @@ def test_template_session_skips_unfilled_exercises(client):
     resp = client.post("/sessions/new", data=payload)
     assert resp.status_code == 200  # follows redirect to /sessions
 
-    sess = db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()).first()
+    sess = _one(db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()))
     sets = db.query(models.SetEntry).filter(models.SetEntry.session_id == sess.id).all()
     # Only the two filled-in Bench sets should exist — no 0-rep phantoms.
     assert len(sets) == 2
@@ -340,7 +347,7 @@ def test_template_session_skips_unfilled_exercises(client):
         db.query(models.SetEntry).filter(
             models.SetEntry.session_id == sess.id,
             models.SetEntry.exercise_id == bench.id
-        ).all(), key=lambda s: s.set_number)
+        ).all(), key=lambda s: s.set_number or 0)
     assert [s.set_number for s in bench_sets] == [1, 2]
     assert bench_sets[0].reps == 10 and bench_sets[0].weight == 50.0
     assert bench_sets[1].reps == 8 and bench_sets[1].weight == 60.0
@@ -357,7 +364,7 @@ def test_edit_session_deletes_emptied_set(client):
     # Create exercise and session with 2 filled sets.
     client.post("/exercises", data={"name": "OHP", "is_bodyweight": "0"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="OHP").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="OHP"))
     ex_id = ex.id
 
     payload = {
@@ -370,7 +377,7 @@ def test_edit_session_deletes_emptied_set(client):
     }
     client.post("/sessions/new", data=payload)
 
-    sess = db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()).first()
+    sess = _one(db.query(models.WorkoutSession).order_by(models.WorkoutSession.id.desc()))
     session_id = sess.id
     assert db.query(models.SetEntry).filter(
         models.SetEntry.session_id == session_id).count() == 2
@@ -409,7 +416,7 @@ def test_edit_form_with_gapped_set_numbers_preserves_all_sets(client):
     real set 3 and a plain save silently deleted set 3's data."""
     client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Bench Press").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
     ex_id = ex.id
 
     payload = {
@@ -420,8 +427,8 @@ def test_edit_form_with_gapped_set_numbers_preserves_all_sets(client):
         f"reps-{ex_id}-3": "6",  f"weight-{ex_id}-3": "60",
     }
     client.post("/sessions/new", data=payload)
-    session_id = db.query(models.WorkoutSession).order_by(
-        models.WorkoutSession.id.desc()).first().id
+    session_id = _one(db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc())).id
 
     # Delete the middle set (2) via edit.
     client.post(f"/sessions/edit/{session_id}", data={
@@ -432,7 +439,7 @@ def test_edit_form_with_gapped_set_numbers_preserves_all_sets(client):
         f"reps-{ex_id}-3": "6",  f"weight-{ex_id}-3": "60",
     })
     db.expire_all()
-    nums = sorted(s.set_number for s in db.query(models.SetEntry)
+    nums = sorted(s.set_number or 0 for s in db.query(models.SetEntry)
                   .filter(models.SetEntry.session_id == session_id).all())
     assert nums == [1, 3]
 
@@ -456,7 +463,7 @@ def test_edit_form_with_gapped_set_numbers_preserves_all_sets(client):
     db.expire_all()
     remaining = db.query(models.SetEntry).filter(
         models.SetEntry.session_id == session_id).all()
-    assert sorted(s.set_number for s in remaining) == [1, 3]
+    assert sorted(s.set_number or 0 for s in remaining) == [1, 3]
     s3 = next(s for s in remaining if s.set_number == 3)
     assert s3.reps == 6 and s3.weight == 60.0
 
@@ -471,9 +478,9 @@ def test_edit_form_offers_template_exercises_not_yet_logged(client):
     client.post("/exercises", data={"name": "Rows", "is_bodyweight": "0"})
     client.post("/templates", data={"name": "Push Day"})
     db = SessionLocal()
-    bench = db.query(models.Exercise).filter_by(name="Bench Press").first()
-    row = db.query(models.Exercise).filter_by(name="Rows").first()
-    tpl = db.query(models.SessionTemplate).filter_by(name="Push Day").first()
+    bench = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
+    row = _one(db.query(models.Exercise).filter_by(name="Rows"))
+    tpl = _one(db.query(models.SessionTemplate).filter_by(name="Push Day"))
     bench_id, row_id, tpl_id = bench.id, row.id, tpl.id
     db.close()
 
@@ -489,8 +496,8 @@ def test_edit_form_offers_template_exercises_not_yet_logged(client):
         f"reps-{bench_id}-1": "10", f"weight-{bench_id}-1": "50",
     })
     db = SessionLocal()
-    session_id = db.query(models.WorkoutSession).order_by(
-        models.WorkoutSession.id.desc()).first().id
+    session_id = _one(db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc())).id
     db.close()
 
     html = client.get(f"/sessions/edit/{session_id}").text
@@ -529,7 +536,7 @@ def test_progression_includes_weightless_session_on_weighted_exercise(client):
     charts can exclude it — rather than vanishing silently."""
     client.post("/exercises", data={"name": "Bench Press", "is_bodyweight": "0"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Bench Press").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
     ex_id = ex.id
 
     payload = {
@@ -555,7 +562,7 @@ def test_progression_flagged_on_bodyweight_rows(client):
     has_weight=True."""
     client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Push Ups").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Push Ups"))
     ex_id = ex.id
     client.post("/sessions/new", data={
         "date": date.today().isoformat(),
@@ -574,7 +581,7 @@ def test_delete_exercise_used_in_session_is_rejected(client):
     so we don't orphan rows the UI can no longer address."""
     client.post("/exercises", data={"name": "Squat", "is_bodyweight": "0"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Squat").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Squat"))
     ex_id = ex.id
 
     client.post("/sessions/new", data={
@@ -594,9 +601,9 @@ def test_delete_exercise_used_in_template_is_rejected(client):
     client.post("/exercises", data={"name": "Rows", "is_bodyweight": "0"})
     client.post("/templates", data={"name": "Pull Day"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Rows").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Rows"))
     ex_id = ex.id
-    tpl = db.query(models.SessionTemplate).filter_by(name="Pull Day").first()
+    tpl = _one(db.query(models.SessionTemplate).filter_by(name="Pull Day"))
     tpl_id = tpl.id
 
     client.post(f"/templates/{tpl_id}/add_exercise",
@@ -612,7 +619,7 @@ def test_delete_unused_exercise_succeeds(client):
     """An exercise with no referencing rows still deletes fine."""
     client.post("/exercises", data={"name": "Curls", "is_bodyweight": "0"})
     db = SessionLocal()
-    ex = db.query(models.Exercise).filter_by(name="Curls").first()
+    ex = _one(db.query(models.Exercise).filter_by(name="Curls"))
     ex_id = ex.id
     resp = client.post(f"/exercises/{ex_id}/delete")
     assert resp.status_code == 200
@@ -637,8 +644,8 @@ def test_edit_session_rejects_malformed_date(client):
     client.post("/sessions/new", data={
         "date": date.today().isoformat(), "template_id": ""})
     db = SessionLocal()
-    sess = db.query(models.WorkoutSession).order_by(
-        models.WorkoutSession.id.desc()).first()
+    sess = _one(db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc()))
     resp = client.post(f"/sessions/edit/{sess.id}", data={"date": "garbage"})
     assert resp.status_code == 400
 
