@@ -4,3 +4,10 @@
 *.bak
 *.sqlite
 .env
+# Runtime state: active LLM backend/model selection (bind-mounted volume or
+# repo root for local dev — bare name covers both)
+llm_state.json
+# playwright artifacts
+.playwright-mcp/
+/coach-streaming-live.png
+/ai-paste-preview.png

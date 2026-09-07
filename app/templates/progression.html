@@ -147,7 +147,7 @@
 
 {% block scripts %}
 {% if selected_exercise %}
-<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<script src="/static/js/echarts.min.js?v={{ static_version }}"></script>
 <script>
 (async function() {
   const exerciseId = {{ selected_exercise.id }};

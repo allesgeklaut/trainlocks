@@ -1,20 +1,21 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, Date, Float
-from sqlalchemy.orm import relationship
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from datetime import date as date_type, datetime, timezone
 from .database import Base
 
 
 class Exercise(Base):
     __tablename__ = "exercises"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
-    is_bodyweight = Column(Boolean, default=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String, unique=True, index=True)
+    is_bodyweight: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class SessionTemplate(Base):
     __tablename__ = "session_templates"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True)
-    exercises = relationship(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String, unique=True, index=True)
+    exercises: Mapped[list["SessionTemplateExercise"]] = relationship(
         "SessionTemplateExercise",
         back_populates="session_template",
         cascade="all, delete-orphan",
@@ -24,52 +25,76 @@ class SessionTemplate(Base):
 
 class SessionTemplateExercise(Base):
     __tablename__ = "session_template_exercises"
-    id = Column(Integer, primary_key=True, index=True)
-    session_template_id = Column(Integer, ForeignKey("session_templates.id"))
-    exercise_id = Column(Integer, ForeignKey("exercises.id"))
-    sets = Column(Integer)
-    order = Column(Integer)
-    session_template = relationship("SessionTemplate", back_populates="exercises")
-    exercise = relationship("Exercise")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    session_template_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("session_templates.id"))
+    exercise_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("exercises.id"))
+    sets: Mapped[int | None] = mapped_column(Integer)
+    order: Mapped[int | None] = mapped_column(Integer)
+    session_template: Mapped["SessionTemplate | None"] = relationship("SessionTemplate", back_populates="exercises")
+    exercise: Mapped["Exercise | None"] = relationship("Exercise")
 
 
 class WorkoutSession(Base):
     __tablename__ = "workout_sessions"
-    id = Column(Integer, primary_key=True, index=True)
-    date = Column(Date, index=True)
-    template_id = Column(Integer, ForeignKey("session_templates.id"), nullable=True)
-    notes = Column(String, nullable=True)
-    template = relationship("SessionTemplate")
-    sets = relationship("SetEntry", back_populates="session", cascade="all, delete-orphan")
-    cardio = relationship("CardioActivity", back_populates="session", cascade="all, delete-orphan", order_by="CardioActivity.id")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    date: Mapped[date_type | None] = mapped_column(Date, index=True)
+    template_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("session_templates.id"), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    template: Mapped["SessionTemplate | None"] = relationship("SessionTemplate")
+    sets: Mapped[list["SetEntry"]] = relationship("SetEntry", back_populates="session", cascade="all, delete-orphan")
+    cardio: Mapped[list["CardioActivity"]] = relationship("CardioActivity", back_populates="session", cascade="all, delete-orphan", order_by="CardioActivity.id")
 
 
 class CardioActivity(Base):
     __tablename__ = "cardio_activities"
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("workout_sessions.id"), index=True)
-    activity_type = Column(String, nullable=False)
-    distance_km = Column(Float, nullable=True)
-    duration_min = Column(Float, nullable=True)
-    notes = Column(String, nullable=True)
-    session = relationship("WorkoutSession", back_populates="cardio")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    session_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("workout_sessions.id"), index=True)
+    activity_type: Mapped[str] = mapped_column(String, nullable=False)
+    distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    duration_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # AI extraction pours screenshot metrics (pace, HR, elevation, …) into
+    # notes — unbounded text, so Column(Text) not VARCHAR.
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    session: Mapped["WorkoutSession | None"] = relationship("WorkoutSession", back_populates="cardio")
 
 
 class SetEntry(Base):
     __tablename__ = "set_entries"
-    id = Column(Integer, primary_key=True, index=True)
-    session_id = Column(Integer, ForeignKey("workout_sessions.id"))
-    exercise_id = Column(Integer, ForeignKey("exercises.id"))
-    set_number = Column(Integer)
-    reps = Column(Integer)
-    weight = Column(Float, nullable=True)
-    session = relationship("WorkoutSession", back_populates="sets")
-    exercise = relationship("Exercise")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    session_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("workout_sessions.id"))
+    exercise_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("exercises.id"))
+    set_number: Mapped[int | None] = mapped_column(Integer)
+    reps: Mapped[int | None] = mapped_column(Integer)
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    session: Mapped["WorkoutSession"] = relationship("WorkoutSession", back_populates="sets")
+    exercise: Mapped["Exercise | None"] = relationship("Exercise")
 
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    bodyweight = Column(Float, nullable=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    username: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String, nullable=False)
+    bodyweight: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class CoachChatMessage(Base):
+    """Persistent conversation history for the fitness-coach chat.
+
+    Stored so the active chat session survives page reloads and the LLM can
+    be fed the full prior context on every turn.
+    """
+
+    __tablename__ = "coach_chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    # user | assistant
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Timezone-aware UTC; stored naive in SQLite for consistency with the
+    # rest of the schema (ordering is only ever compared within this column).
+    created_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+        index=True,
+    )

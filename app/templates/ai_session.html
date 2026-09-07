@@ -1,0 +1,275 @@
+{% extends layout %}
+{% block title %}AI Session — Training Log{% endblock %}
+{% block content %}
+<div class="page-header">
+  <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/sessions/ai<span class="caret" aria-hidden="true"></span></button>
+  <h1 class="page-title">Log from Screenshot</h1>
+  <p class="page-subtitle">Upload a workout screenshot — the AI fills in the session for you to review</p>
+</div>
+
+{% if extract_error %}
+<div class="card ai-error-card" style="max-width:560px;margin-bottom:var(--space-4)">
+  <div class="card-title">Extraction failed</div>
+  <p style="font-size:var(--text-sm);color:var(--color-error);margin:0 0 var(--space-2)">{{ extract_error }}</p>
+</div>
+{% endif %}
+
+<div class="card" style="max-width:560px">
+  <div class="card-title">Upload Screenshot</div>
+  <form method="post" action="/sessions/ai/extract" enctype="multipart/form-data"
+    hx-boost="false" onsubmit="return aiSubmit(this)">
+    <div class="form-group">
+      <label for="screenshot">Workout screenshot (PNG / JPEG, max 10 MB)</label>
+      <input type="file" id="screenshot" name="screenshot" accept="image/png,image/jpeg,image/webp" required />
+    </div>
+    <div class="form-group ai-paste-zone" id="paste-zone" tabindex="0">
+      <strong>…or paste from clipboard</strong>
+      <span class="ai-paste-hint">Copy a screenshot (Win+Shift+S, Cmd+Shift+4, or "Copy image") and press Ctrl/Cmd+V here or anywhere on this page. On a phone: tap the paste field below, then choose <em>Paste</em>.</span>
+      <img id="paste-preview" alt="" hidden />
+      <span id="paste-name" class="ai-paste-name" hidden></span>
+    </div>
+    <div class="form-group ai-paste-tap" id="paste-tap-wrap">
+      <label for="paste-catcher">📱 On a phone? Tap here, then tap <em>Paste</em> to insert a screenshot from your clipboard.</label>
+      <!-- contenteditable + focused on tap makes iOS/Android show the native
+           "Paste" bubble; the pasted image arrives as a paste event, which the
+           global handler converts into a file selection. -->
+      <div id="paste-catcher" contenteditable="true" aria-label="Paste screenshot here"></div>
+    </div>
+    <button type="submit" class="btn btn-primary" id="ai-btn">Extract with AI</button>
+    <a href="/sessions" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
+    <div id="ai-status" class="ai-status" hidden></div>
+  </form>
+
+  <div class="ai-picker-row">
+    <div class="select-wrap">
+      <select id="llm-model" title="Active LLM backend / model" onchange="switchLLMModel()">
+        <option value="">loading models…</option>
+      </select>
+    </div>
+    <span class="ai-vision-hint">⚠ Screenshot extraction needs a vision-capable model — e.g. ollama's glm-5.3-flash:cloud or gemma4, or gpt-4o. Text-only models (nemotron, qwen) will fail.</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ── Clipboard paste → fills the file input ─────────────────────────────
+  (function () {
+    const input = document.getElementById('screenshot');
+    const zone = document.getElementById('paste-zone');
+    const preview = document.getElementById('paste-preview');
+    const nameEl = document.getElementById('paste-name');
+    const dataTransfer = new DataTransfer();
+
+    function acceptImage(blob) {
+      if (!blob || !blob.type.startsWith('image/')) return false;
+      if (blob.size > 10 * 1024 * 1024) {
+        alert('Clipboard image is larger than 10 MB.');
+        return true;
+      }
+      const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      const file = new File([blob], 'clipboard.' + ext, { type: blob.type });
+      dataTransfer.items.clear();
+      dataTransfer.items.add(file);
+      input.files = dataTransfer.files;
+      // Show a preview.
+      const url = URL.createObjectURL(blob);
+      preview.src = url;
+      preview.hidden = false;
+      nameEl.textContent = 'clipboard.' + ext + ' (' + Math.round(blob.size / 1024) + ' KB)';
+      nameEl.hidden = false;
+      zone.classList.add('has-image');
+      return true;
+    }
+
+    // Paste anywhere on the page (also catches the mobile paste-catcher).
+    document.addEventListener('paste', function (e) {
+      const items = (e.clipboardData || window.clipboardData)?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.kind === 'file' && acceptImage(item.getAsFile())) {
+          e.preventDefault();
+          // Clear the mobile paste-catcher so it stays empty for next time.
+          const catcher = document.getElementById('paste-catcher');
+          if (catcher) catcher.innerHTML = '';
+          return;
+        }
+      }
+    });
+
+    // Mobile: focusing a contenteditable shows the native Paste bubble.
+    const catcher = document.getElementById('paste-catcher');
+    document.getElementById('paste-tap-wrap')?.addEventListener('click', function () {
+      catcher.focus();
+    });
+    // Swallow typed characters (only paste makes sense here).
+    catcher.addEventListener('beforeinput', function (e) {
+      if (e.inputType === 'insertText' || e.inputType === 'insertParagraph') e.preventDefault();
+    });
+
+    // Clicking the zone focuses it; Ctrl/Cmd+V then works via the global handler.
+    zone.addEventListener('click', function () { input.click(); });
+    input.addEventListener('change', function () {
+      if (!input.files.length) return;
+      const f = input.files[0];
+      const url = URL.createObjectURL(f);
+      preview.src = url;
+      preview.hidden = false;
+      nameEl.textContent = f.name + ' (' + Math.round(f.size / 1024) + ' KB)';
+      nameEl.hidden = false;
+      zone.classList.add('has-image');
+    });
+
+    // Drag & drop support too.
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+    zone.addEventListener('drop', function (e) {
+      e.preventDefault();
+      zone.classList.remove('drag');
+      const f = e.dataTransfer?.files?.[0];
+      if (f && f.type.startsWith('image/')) {
+        dataTransfer.items.clear();
+        dataTransfer.items.add(f);
+        input.files = dataTransfer.files;
+        input.dispatchEvent(new Event('change'));
+      }
+    });
+  })();
+
+  function aiSubmit(form) {
+    const btn = document.getElementById('ai-btn');
+    const status = document.getElementById('ai-status');
+    btn.disabled = true;
+    status.hidden = false;
+    status.textContent = 'Reading the screenshot with ' + (document.getElementById('llm-model').selectedOptions[0]?.text || 'the AI') + ' — this can take a minute…';
+    return true; // normal form POST; server renders the review page
+  }
+
+  async function loadLLMModels() {
+    const sel = document.getElementById('llm-model');
+    try {
+      const st = await (await fetch('/api/llm/status')).json();
+      sel.innerHTML = '';
+      for (const b of (st.backends || [])) {
+        const grp = document.createElement('optgroup');
+        grp.label = b.name;
+        const models = (b.models && b.models.length) ? b.models : [b.model || ''];
+        for (const m of models) {
+          const opt = document.createElement('option');
+          opt.value = b.name + '::' + m;
+          opt.textContent = b.name + ' · ' + (m || '(default)');
+          if (b.name === st.active_backend && m === st.active_model) opt.selected = true;
+          grp.appendChild(opt);
+        }
+        sel.appendChild(grp);
+      }
+      if (!sel.options.length) sel.innerHTML = '<option value="">no LLM backends</option>';
+    } catch (e) {
+      sel.innerHTML = '<option value="">LLM unavailable</option>';
+    }
+  }
+
+  async function switchLLMModel() {
+    const val = document.getElementById('llm-model').value;
+    if (!val) return;
+    const sep = val.indexOf('::');
+    const backend = sep === -1 ? val : val.slice(0, sep);
+    const model = sep === -1 ? '' : val.slice(sep + 2);
+    try {
+      await fetch('/api/llm/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backend, model }),
+      });
+    } catch (e) { loadLLMModels(); }
+  }
+
+  loadLLMModels();
+</script>
+<style>
+  .ai-status {
+    margin-top: var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+
+  .ai-picker-row {
+    margin-top: var(--space-4);
+    padding-top: var(--space-3);
+    border-top: 1px solid var(--color-divider);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .ai-vision-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .ai-error-card {
+    border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
+  }
+
+  .ai-paste-zone {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-4);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .ai-paste-zone:hover,
+  .ai-paste-zone.drag {
+    border-color: var(--color-primary);
+    background: var(--color-primary-highlight);
+  }
+
+  .ai-paste-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+
+  .ai-paste-zone img {
+    max-width: 240px;
+    max-height: 140px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    align-self: center;
+  }
+
+  .ai-paste-name {
+    font-size: var(--text-xs);
+    color: var(--color-text-faint);
+    text-align: center;
+  }
+
+  .ai-paste-tap label {
+    display: block;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    margin-bottom: var(--space-2);
+  }
+
+  #paste-catcher {
+    min-height: 56px;
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--color-text-faint);
+    outline: none;
+    transition: border-color 0.15s ease;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  #paste-catcher:focus {
+    border-color: var(--color-primary);
+    background: var(--color-primary-highlight);
+  }
+</style>
+{% endblock %}

@@ -69,7 +69,7 @@
     color: [colorPrimary, colorBlue],
     legend: {
       top: 2,
-      right: 0,
+      left: "center",
       icon: "circle",
       itemWidth: 8,
       itemHeight: 8,
@@ -159,11 +159,21 @@
   }
 
   function render() {
+    // History-restore clones (htmx back/forward) carry the old instance id in
+    // the `_echarts_instance_` attribute, so echarts.init() would silently
+    // return the orphaned instance still bound to the detached pre-navigation
+    // element — rendering into a canvas that's no longer on screen. Dispose
+    // that stale registration before initializing on the live element.
+    const stale = echarts.getInstanceByDom(el);
+    if (stale && !stale.isDisposed()) stale.dispose();
     chart = echarts.init(el, null, { renderer: "canvas" });
     chart.setOption(buildOption());
 
     // Redraw on container resize (htmx swaps change container size)
-    const ro = new ResizeObserver(() => chart && !chart.isDisposed() && chart.resize());
+    const ro = new ResizeObserver(() => {
+      if (!el.isConnected) { ro.disconnect(); return; }
+      chart && !chart.isDisposed() && chart.resize();
+    });
     ro.observe(el);
   }
 
@@ -181,7 +191,7 @@
     render();
   } else {
     const s = document.createElement("script");
-    s.src = "https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js";
+    s.src = "/static/js/echarts.min.js?v={{ static_version }}";
     s.onload = render;
     document.head.appendChild(s);
   }
