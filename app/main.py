@@ -197,10 +197,12 @@ with engine.begin() as conn:
     # ties fall back to the lower id. Duplicated rows (no sets anywhere)
     # keep their template refs; only their dup row is removed.
     _DUP_EXERCISE_NAMES: tuple[tuple[str, str], ...] = (
-        ("pull-up", "pullups"), ("pull up", "pullups"), ("pullup", "pullups"),
+        ("pull-up", "pullups"), ("pull up", "pullups"), ("pull ups", "pullups"),
+        ("pullup", "pullups"),
         ("chin-up", "chinups"), ("chin up", "chinups"),
         ("dip", "dips"),
-        ("push-up", "push ups"), ("pushup", "push ups"),
+        ("push-up", "push ups"), ("push up", "push ups"),
+        ("pushup", "push ups"),
         ("lunge", "lunges"),
         ("bodyweight squat", "bodyweight squats"),
     )
