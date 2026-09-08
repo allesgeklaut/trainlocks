@@ -35,10 +35,14 @@
       </form>
     </div>
 
+    {% if tpl.description %}
+    <p style="font-size:var(--font-size-sm);color:var(--color-text-muted);margin:var(--space-2) 0 0;white-space:pre-line">{{ tpl.description }}</p>
+    {% endif %}
+
     {% if tpl.exercises %}
     <div class="table-wrap" style="margin-bottom:var(--space-4)">
       <table>
-        <thead><tr><th>#</th><th>Exercise</th><th>Sets</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>Exercise</th><th>Sets</th><th>Prescription</th><th></th></tr></thead>
         <tbody>
           {% for te in tpl.exercises %}
           <tr>
@@ -48,6 +52,7 @@
               {% if te.exercise.is_bodyweight %}<span class="badge badge-bw" style="margin-left:var(--space-2)">BW</span>{% endif %}
             </td>
             <td>{{ te.sets }}</td>
+            <td>{{ te.prescription or "—" }}</td>
             <td>
               <form method="post" action="/templates/{{ tpl.id }}/remove_exercise/{{ te.id }}" style="display:inline">
                 <button type="submit" class="btn btn-secondary btn-sm">Remove</button>

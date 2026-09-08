@@ -69,7 +69,7 @@
     </div>
     <div id="table-wrap" class="table-wrap" style="display:none">
       <table>
-        <thead><tr><th>Date</th><th id="th-weight">Top Weight</th><th>Volume</th><th>Total Reps</th></tr></thead>
+        <thead><tr><th>Date</th><th id="th-weight">Top Weight</th><th id="th-vol">Volume (kg)</th><th>Total Reps</th></tr></thead>
         <tbody id="table-body"></tbody>
       </table>
     </div>
@@ -159,22 +159,40 @@
   const isBodyweight = chartData.length > 0 && chartData[0].is_bodyweight;
   const isCompact = window.matchMedia("(max-width: 768px)").matches;
   const labels = chartData.map(r => isCompact ? r.date.slice(5) : r.date);
+  const isHold = chartData.length > 0 && chartData[0].is_hold;
+
+  // Format seconds as m:ss for hold exercises.
+  const fmtTime = s => {
+    const total = Math.round(s);
+    const m = Math.floor(total / 60), sec = total % 60;
+    return m > 0 ? `${m}:${String(sec).padStart(2, "0")}` : `${sec}s`;
+  };
 
   // ── Summary stats ────────────────────────────────────────────────────
   if (chartData.length > 0) {
     const fmt = v => Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(v);
-    const best = chartData.reduce((a, b) => b.est_1rm >= a.est_1rm ? b : a);
     const bestVol = chartData.reduce((a, b) => b.volume >= a.volume ? b : a);
 
     document.getElementById("stat-grid").style.display = "";
-    document.getElementById("stat-top").textContent = isBodyweight
-      ? fmt(best.effective_top_weight)
-      : fmt(Math.max(...chartData.map(r => r.top_weight)));
-    document.getElementById("stat-top-hint").textContent = isBodyweight ? "kg (incl. bodyweight)" : "kg";
-    document.getElementById("stat-1rm").textContent = fmt(best.est_1rm);
-    document.getElementById("stat-vol").textContent = fmt(bestVol.volume);
-    document.getElementById("stat-vol-hint").textContent = isBodyweight ? "total reps" : "kg × reps";
-    document.getElementById("stat-sessions").textContent = data.length;
+    if (isHold) {
+      const bestHold = chartData.reduce((a, b) => b.effective_top_weight >= a.effective_top_weight ? b : a);
+      document.getElementById("stat-top").textContent = fmtTime(bestHold.effective_top_weight);
+      document.getElementById("stat-top-hint").textContent = "longest hold";
+      document.getElementById("stat-1rm").textContent = "—";
+      document.getElementById("stat-vol").textContent = fmtTime(bestVol.volume);
+      document.getElementById("stat-vol-hint").textContent = "total time under tension";
+      document.getElementById("stat-sessions").textContent = data.length;
+    } else {
+      const best = chartData.reduce((a, b) => b.est_1rm >= a.est_1rm ? b : a);
+      document.getElementById("stat-top").textContent = isBodyweight
+        ? fmt(best.effective_top_weight)
+        : fmt(Math.max(...chartData.map(r => r.top_weight)));
+      document.getElementById("stat-top-hint").textContent = isBodyweight ? "kg (effective, incl. bodyweight)" : "kg";
+      document.getElementById("stat-1rm").textContent = fmt(best.est_1rm);
+      document.getElementById("stat-vol").textContent = fmt(bestVol.volume);
+      document.getElementById("stat-vol-hint").textContent = isBodyweight ? "kg tonnage" : "kg × reps";
+      document.getElementById("stat-sessions").textContent = data.length;
+    }
   }
 
   // ── History table ────────────────────────────────────────────────────
@@ -185,15 +203,26 @@
   } else {
     document.getElementById("table-placeholder").style.display = "none";
     document.getElementById("table-wrap").style.display = "";
-    if (isBodyweight) document.getElementById("th-weight").textContent = "Load (incl. BW)";
+    if (isHold) {
+      document.getElementById("th-weight").textContent = "Longest Hold";
+      document.getElementById("th-vol").textContent = "Total Time";
+    } else if (isBodyweight) {
+      document.getElementById("th-weight").textContent = "Load (incl. BW)";
+      document.getElementById("th-vol").textContent = "Volume (kg tonnage)";
+    }
     const max1rm = chartData.length > 0 ? Math.max(...chartData.map(x => x.est_1rm)) : null;
     data.forEach(r => {
       const tr = document.createElement("tr");
-      const weight = r.has_weight
-        ? (isBodyweight ? r.effective_top_weight.toFixed(1) : r.top_weight.toFixed(1))
-        : "—";
-      const isPr = max1rm !== null && r.has_weight && r.est_1rm === max1rm;
-      tr.innerHTML = `<td>${r.date}</td><td>${weight}${isPr ? '<span class="pr-badge">PR</span>' : ''}</td><td>${r.has_weight ? r.volume.toFixed(1) : "—"}</td><td>${r.total_reps}</td>`;
+      if (isHold) {
+        const isPr = r.effective_top_weight === Math.max(...chartData.map(x => x.effective_top_weight));
+        tr.innerHTML = `<td>${r.date}</td><td>${fmtTime(r.effective_top_weight)}${isPr ? '<span class="pr-badge">PR</span>' : ''}</td><td>${fmtTime(r.volume)}</td><td>${r.total_reps} sets</td>`;
+      } else {
+        const weight = r.has_weight
+          ? (isBodyweight ? r.effective_top_weight.toFixed(1) : r.top_weight.toFixed(1))
+          : "—";
+        const isPr = max1rm !== null && r.has_weight && r.est_1rm === max1rm;
+        tr.innerHTML = `<td>${r.date}</td><td>${weight}${isPr ? '<span class="pr-badge">PR</span>' : ''}</td><td>${r.has_weight ? r.volume.toFixed(1) : "—"}</td><td>${r.total_reps}</td>`;
+      }
       tbody.appendChild(tr);
     });
   }
@@ -212,10 +241,15 @@
   // ── Top weight chart ─────────────────────────────────────────────────
   // Weighted: top added weight. Bodyweight: effective load incl. bodyweight
   // (flat added-weight zero lines are meaningless for BW lifts).
-  const weightValues = chartData.map(r => isBodyweight ? r.effective_top_weight : r.top_weight);
-  document.getElementById("weight-chart-title").textContent = isBodyweight
-    ? "Top Load per Session (incl. bodyweight)"
-    : "Top Weight per Session (kg)";
+  // Hold exercises: longest single hold per session, in seconds.
+  const weightValues = chartData.map(r => isHold
+    ? r.effective_top_weight
+    : (isBodyweight ? r.effective_top_weight : r.top_weight));
+  document.getElementById("weight-chart-title").textContent = isHold
+    ? "Longest Hold per Session (s)"
+    : (isBodyweight
+      ? "Top Load per Session (incl. bodyweight)"
+      : "Top Weight per Session (kg)");
 
   // Built from CSS variables on each call so a data-theme toggle re-themes
   // both charts without a page reload (the canvas can't follow CSS vars).
@@ -268,12 +302,13 @@
       axisPointer: { type: "line", lineStyle: { color: alpha(colorPrimary, 0.45), width: 1 } },
       formatter: (params) => {
         const p = params[0];
+        const unit = isHold ? "s" : " kg";
         return `<div style="font-weight:600;color:${colorText};margin-bottom:6px">${chartData[p.dataIndex].date}</div>` +
-          `<div style="color:${colorMuted}">${Number(p.value).toLocaleString("en")} kg</div>`;
+          `<div style="color:${colorMuted}">${Number(p.value).toLocaleString("en")}${unit}</div>`;
       },
     },
     xAxis: { ...baseXAxis, boundaryGap: false, axisPointer: { show: true, lineStyle: { color: alpha(colorPrimary, 0.35) } } },
-    yAxis: { ...baseYAxis, min: isBodyweight ? undefined : 0 },
+    yAxis: { ...baseYAxis, min: (isBodyweight || isHold) ? undefined : 0 },
     series: [{
       type: "line",
       smooth: 0.4,
@@ -305,7 +340,7 @@
       axisPointer: { type: "shadow" },
       formatter: (params) => {
         const p = params[0];
-        const unit = isBodyweight ? " reps" : " kg × reps";
+        const unit = isHold ? "s total" : (isBodyweight ? " reps" : " kg × reps");
         return `<div style="font-weight:600;color:${colorText};margin-bottom:6px">${chartData[p.dataIndex].date}</div>` +
           `<div style="color:${colorMuted}">${Number(p.value).toLocaleString("en")}${unit}</div>`;
       },

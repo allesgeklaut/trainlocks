@@ -109,7 +109,8 @@ def test_api_templates(client):
     t = data[0]
     assert t["name"] == "Upper Body"
     assert t["exercises"] == [{
-        "exercise_id": bench.id, "name": "Bench Press", "sets": 5, "order": 1,
+        "exercise_id": bench.id, "name": "Bench Press", "sets": 5,
+        "prescription": None, "order": 1,
     }]
 
 
@@ -142,7 +143,7 @@ def test_api_sessions_list_and_detail(client):
     pull_sets = [x for x in detail["sets"] if x["exercise_id"] == pull_id]
     assert pull_sets[0] == {
         "exercise_id": pull_id, "exercise": "Pull Ups",
-        "set_number": 1, "reps": 6, "weight": None,
+        "set_number": 1, "reps": 6, "weight": None, "assist_kg": None,
     }
 
 
@@ -621,3 +622,75 @@ def test_boosted_redirect_to_login_uses_hx_redirect(client):
                         follow_redirects=True)
     assert resp.status_code == 200
     assert resp.headers["HX-Redirect"] == "/login"
+
+
+# ---------- Plan import (starter_plans.json) ----------
+
+def _import_plan(client, plan_id: str):
+    return client.post("/browse/plans/import", data={"plan_id": plan_id},
+                       follow_redirects=False)
+
+
+def test_import_plan_creates_template_with_prescriptions(client):
+    resp = _import_plan(client, "gzclp_3day")
+    assert resp.status_code == 303
+    db = SessionLocal()
+    tpl = _one(db.query(models.SessionTemplate).filter_by(name="GZCLP (3-Day)"))
+    assert tpl.description and "Linear progression" in tpl.description
+    exercises = list(tpl.exercises)
+    assert len(exercises) == 12
+    first = exercises[0]
+    assert first.prescription == "T1 5x3+"
+    assert first.sets == 5
+    # The T1 squat exists and keeps its prescription.
+    assert first.exercise is not None and first.exercise.name == "Barbell Squat"
+
+
+def test_import_plan_detects_bodyweight_exercises_and_factors(client):
+    resp = _import_plan(client, "bwf_recommended_routine")
+    assert resp.status_code == 303
+    db = SessionLocal()
+    db.expire_all()
+    push = _one(db.query(models.Exercise).filter_by(name="Push-Up"))
+    pull = _one(db.query(models.Exercise).filter_by(name="Pull-Up"))
+    row = _one(db.query(models.Exercise).filter_by(name="Inverted Row"))
+    plank = _one(db.query(models.Exercise).filter_by(name="Plank"))
+    squat = _one(db.query(models.Exercise).filter_by(name="Bodyweight Squat"))
+    assert push.is_bodyweight is True and push.bw_load_factor == 0.65
+    assert pull.is_bodyweight is True and pull.bw_load_factor == 1.0
+    assert row.is_bodyweight is True and row.bw_load_factor == 0.7
+    assert plank.is_bodyweight is True and plank.bw_load_factor == 0.0
+    assert squat.is_bodyweight is True and squat.bw_load_factor == 0.77
+    # Lunge is also BW with its factor; weighted names would stay absent.
+    lunge = _one(db.query(models.Exercise).filter_by(name="Lunge"))
+    assert lunge.is_bodyweight is True and lunge.bw_load_factor == 0.85
+    assert db.query(models.Exercise).filter_by(name="Barbell Bench Press").first() is None
+
+
+def test_import_plan_is_idempotent_on_exercises(client):
+    """Importing two plans that share exercise names must not duplicate rows,
+    and the second import picks up existing factor data."""
+    assert _import_plan(client, "bodyweight_full").status_code == 303
+    assert _import_plan(client, "bwf_recommended_routine").status_code == 303
+    db = SessionLocal()
+    db.expire_all()
+    pushes = db.query(models.Exercise).filter_by(name="Push-Up").all()
+    assert len(pushes) == 1
+    assert pushes[0].bw_load_factor == 0.65
+    # Duplicate template names get suffixed.
+    names = {t.name for t in db.query(models.SessionTemplate).all()}
+    assert "Bodyweight Full Body" in names
+    assert "BWF Recommended Routine" in names
+
+
+def test_import_unknown_plan_404s(client):
+    resp = _import_plan(client, "no_such_plan")
+    assert resp.status_code == 404
+
+
+def test_browse_plans_page_lists_new_programs(client):
+    resp = client.get("/browse/plans")
+    assert resp.status_code == 200
+    for label in ("GZCLP", "5/3/1 for Beginners", "StrongLifts", "PHUL",
+                  "Coolcicada PPL", "BWF Recommended Routine"):
+        assert label in resp.text

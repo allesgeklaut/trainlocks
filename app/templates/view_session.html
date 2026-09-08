@@ -29,15 +29,17 @@
           <th>Set</th>
           <th>Reps</th>
           <th>Weight (kg)</th>
+          <th>Assist (kg)</th>
         </tr>
       </thead>
       <tbody>
         {% for se in session.sets %}
         <tr>
-          <td>{{ se.exercise.name }}{% if se.exercise.is_bodyweight %} <span class="badge badge-bw">Bodyweight</span>{% endif %}</td>
+          <td>{{ se.exercise.name }}{% if se.exercise.is_hold %} <span class="badge badge-bw">Hold</span>{% elif se.exercise.is_bodyweight %} <span class="badge badge-bw">Bodyweight</span>{% endif %}</td>
           <td>{{ se.set_number }}</td>
-          <td>{{ se.reps }}</td>
+          <td>{% if se.exercise.is_hold %}{{ (se.duration_seconds or se.reps or 0) }}s{% else %}{{ se.reps }}{% endif %}</td>
           <td>{{ se.weight if se.weight is not none else "—" }}</td>
+          <td>{{ se.assist_kg if se.assist_kg else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
