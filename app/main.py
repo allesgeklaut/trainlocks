@@ -767,6 +767,11 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
         if reps == 0 and weight is None and assist is None:
             continue
 
+        # Mutually exclusive by model: assist wins if both arrive (the UI
+        # can't produce this, but API clients could).
+        if assist is not None and weight is not None:
+            weight = None
+
         db.add(models.SetEntry(
             session_id=workout.id,
             exercise_id=ex_id,
@@ -943,7 +948,13 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
         if existing:
             existing.reps = reps
             existing.weight = weight
+            # Assist flips to weight (and vice versa) clear the other
+            # direction so a set never keeps both after an edit.
             existing.assist_kg = assist
+            if assist is not None:
+                existing.weight = None
+            elif weight is not None and existing.assist_kg:
+                existing.assist_kg = None
         else:
             db.add(models.SetEntry(
                 session_id=session_id,
