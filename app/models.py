@@ -9,12 +9,20 @@ class Exercise(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String, unique=True, index=True)
     is_bodyweight: Mapped[bool] = mapped_column(Boolean, default=False)
+    # % of bodyweight used as load for this exercise (0..1). NULL means
+    # "use the research default" (1.0 for pull-ups/dips, 0.65 for push-ups,
+    # …) — see app/load.py. NULL is preserved so unknown exercises keep
+    # the legacy full-bodyweight behavior until backfilled.
+    bw_load_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class SessionTemplate(Base):
     __tablename__ = "session_templates"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String, unique=True, index=True)
+    # Free-text description from imported plans (goal, level, progression
+    # notes). Rendered on the templates page and as a session-form hint.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     exercises: Mapped[list["SessionTemplateExercise"]] = relationship(
         "SessionTemplateExercise",
         back_populates="session_template",
@@ -30,6 +38,8 @@ class SessionTemplateExercise(Base):
     exercise_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("exercises.id"))
     sets: Mapped[int | None] = mapped_column(Integer)
     order: Mapped[int | None] = mapped_column(Integer)
+    # Set/rep scheme label from imported plans, e.g. "5x3+" or "3x8-12".
+    prescription: Mapped[str | None] = mapped_column(String, nullable=True)
     session_template: Mapped["SessionTemplate | None"] = relationship("SessionTemplate", back_populates="exercises")
     exercise: Mapped["Exercise | None"] = relationship("Exercise")
 
@@ -66,6 +76,10 @@ class SetEntry(Base):
     set_number: Mapped[int | None] = mapped_column(Integer)
     reps: Mapped[int | None] = mapped_column(Integer)
     weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Counterweight support for BW exercises (supported dips, assisted
+    # pull-up machines): kg of bodyweight the machine removes, subtracted
+    # from the effective load. NULL = no support.
+    assist_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     session: Mapped["WorkoutSession"] = relationship("WorkoutSession", back_populates="sets")
     exercise: Mapped["Exercise | None"] = relationship("Exercise")
 
