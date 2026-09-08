@@ -44,14 +44,16 @@
   {% for te in selected_template.exercises %}
   {% set ex_id = te.exercise.id %}
   {% set is_bw = te.exercise.is_bodyweight %}
+  {% set is_hold = te.exercise.is_hold %}
   {% set set_nums = te.set_numbers if te.set_numbers is defined else range(1, te.sets + 1) %}
   <div class="exercise-block" data-ex-id="{{ ex_id }}" data-name="{{ te.exercise.name }}"
-       data-weighted="{{ '1' if not is_bw else '0' }}" style="max-width:520px">
+       data-weighted="{{ '1' if not is_bw and not is_hold else '0' }}" style="max-width:520px">
     <div class="exercise-block-title">
       {{ te.order }}. {{ te.exercise.name }}
-      {% if is_bw %}<span class="badge badge-bw">Bodyweight</span>{% else %}<span
+      {% if is_hold %}<span class="badge badge-bw">Hold (sec)</span>
+      {% elif is_bw %}<span class="badge badge-bw">Bodyweight</span>{% else %}<span
         class="badge badge-weighted">Weighted</span>{% endif %}
-      {% if is_bw %}
+      {% if is_bw and not is_hold %}
       <label class="support-toggle" style="margin-left:auto;font-size:var(--font-size-sm);display:flex;align-items:center;gap:var(--space-1)">
         <input type="checkbox" class="supported-check" data-ex-id="{{ ex_id }}" />
         Supported
@@ -62,6 +64,25 @@
     <div style="font-size:var(--font-size-sm);color:var(--color-text-muted);margin-bottom:var(--space-2)">{{ te.prescription }}</div>
     {% endif %}
     <div class="sets-grid">
+      {% if is_hold %}
+      <div class="col-header">Set</div>
+      <div class="col-header">Hold (s)</div>
+      <div class="col-header">Added kg</div>
+      {% for s in set_nums %}
+      {% set es = existing_sets.get((ex_id, s)) if existing_sets else None %}
+      <div class="set-num">{{ s }}</div>
+      <input type="number" name="time-{{ ex_id }}-{{ s }}" min="0" placeholder="seconds"
+        value="{{ (es.duration_seconds if es and es.duration_seconds is not none else (es.reps if es and es.reps else '')) }}" />
+      <input type="number" step="0.5" class="load-input"
+        name="weight-{{ ex_id }}-{{ s }}" min="0" placeholder="Added kg"
+        value="{{ es.weight if es and es.weight is not none else '' }}" />
+      {% endfor %}
+      {% set ghost = (set_nums[-1] + 1) if set_nums else 1 %}
+      <div class="set-num ghost-row">{{ ghost }}</div>
+      <input type="number" class="ghost-row" name="time-{{ ex_id }}-{{ ghost }}" min="0" placeholder="seconds" />
+      <input type="number" step="0.5" class="ghost-row load-input"
+        name="weight-{{ ex_id }}-{{ ghost }}" min="0" placeholder="Added kg" />
+      {% else %}
       <div class="col-header">Set</div>
       <div class="col-header">Reps</div>
       <div class="col-header load-col-header">
@@ -96,6 +117,7 @@
       <input type="number" step="0.5" class="ghost-row load-input"
         name="weight-{{ ex_id }}-{{ ghost }}" min="0" placeholder="kg" />
       {% endif %}
+      {% endif %}
     </div>
   </div>
   {% endfor %}
@@ -118,8 +140,8 @@
 
     function nextSetNum() {
       var max = 0;
-      grid.querySelectorAll('input[name^="reps-"]').forEach(function (input) {
-        var m = input.name.match(/reps-\d+-(\d+)/);
+      grid.querySelectorAll('input[name^="reps-"], input[name^="time-"]').forEach(function (input) {
+        var m = input.name.match(/^(?:reps|time)-\d+-(\d+)/);
         if (m) { var n = parseInt(m[1], 10); if (n > max) max = n; }
       });
       return max + 1;
@@ -133,26 +155,38 @@
       if (!t.value) return;
       // Promote the whole ghost row.
       block.querySelectorAll('.ghost-row').forEach(function (el) { el.classList.remove('ghost-row'); });
-      // Append a fresh ghost row (3 cells: set number, reps, load). The new
-      // load field inherits the block's current mode via its name prefix.
+      // Append a fresh ghost row (3 cells: set number, work, load). The
+      // work field matches the block type (time- for holds, reps- else);
+      // the load field inherits the block's current mode.
       var exId = block.dataset.exId;
+      var isHold = !!grid.querySelector('input[name^="time-"]');
       var n = nextSetNum();
       var check = block.querySelector('.supported-check');
       var asAssist = check && check.checked;
       var numDiv = document.createElement('div');
       numDiv.className = 'set-num ghost-row';
       numDiv.textContent = n.toString();
-      var reps = document.createElement('input');
-      reps.type = 'number'; reps.min = '0'; reps.placeholder = '0';
-      reps.className = 'ghost-row'; reps.name = 'reps-' + exId + '-' + n;
-      var wt = document.createElement('input');
-      wt.type = 'number'; wt.step = '0.5'; wt.min = '0';
-      wt.placeholder = asAssist ? 'Assist kg' : 'Added kg';
-      wt.className = 'ghost-row load-input';
-      wt.name = (asAssist ? 'assist-' : 'weight-') + exId + '-' + n;
+      var work = document.createElement('input');
+      work.type = 'number'; work.min = '0';
+      if (isHold) {
+        work.placeholder = 'seconds';
+        work.name = 'time-' + exId + '-' + n;
+      } else {
+        work.placeholder = '0';
+        work.name = 'reps-' + exId + '-' + n;
+      }
+      work.className = 'ghost-row';
       grid.appendChild(numDiv);
-      grid.appendChild(reps);
-      grid.appendChild(wt);
+      grid.appendChild(work);
+      // Hold rows keep the optional added-weight field (weighted planks).
+      if (!isHold) {
+        var wt = document.createElement('input');
+        wt.type = 'number'; wt.step = '0.5'; wt.min = '0';
+        wt.placeholder = asAssist ? 'Assist kg' : 'Added kg';
+        wt.className = 'ghost-row load-input';
+        wt.name = (asAssist ? 'assist-' : 'weight-') + exId + '-' + n;
+        grid.appendChild(wt);
+      }
     });
   });
 
