@@ -24,13 +24,21 @@
       {% for item in plan.exercises %}
       <li>
         <span class="plan-ex-name">{{ item.name }}</span>
-        <span class="plan-ex-sets">{{ item.sets }} sets</span>
+        <span class="plan-ex-sets">{% if item.prescription %}{{ item.prescription }}{% else %}{{ item.sets }} sets{% endif %}</span>
         {% if item.name not in existing_exercises %}
         <span class="plan-ex-new">new exercise</span>
         {% endif %}
       </li>
       {% endfor %}
     </ul>
+    {% if plan.goal or plan.level or plan.days_per_week %}
+    <div style="margin-top:var(--space-3);display:flex;gap:var(--space-2);flex-wrap:wrap;font-size:var(--font-size-sm)">
+      {% if plan.goal %}<span class="badge badge-weighted">{{ plan.goal }}</span>{% endif %}
+      {% if plan.level %}<span class="badge badge-weighted">{{ plan.level }}</span>{% endif %}
+      {% if plan.days_per_week %}<span class="badge badge-weighted">{{ plan.days_per_week }} days/week</span>{% endif %}
+      {% if plan.source %}<span style="color:var(--color-text-muted);align-self:center">source: {{ plan.source }}</span>{% endif %}
+    </div>
+    {% endif %}
 
     <form method="post" action="/browse/plans/import" style="margin-top:var(--space-4)">
       <input type="hidden" name="plan_id" value="{{ plan.id }}" />

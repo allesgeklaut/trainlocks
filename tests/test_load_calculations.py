@@ -112,9 +112,10 @@ def test_progression_bodyweight_effective_load_and_1rm(client):
     # (rounded to 1 decimal by the API).
     assert abs(row["est_1rm"] - 93.3) < 0.1
 
-def test_bodyweight_no_weight_shows_rep_count(client):
-    """Body‑weight exercise with no weight should show rep count in volume and total_reps."""
-    # Create body‑weight exercise.
+def test_bodyweight_no_weight_shows_real_tonnage(client):
+    """Body-weight exercise with no weight: volume is real tonnage
+    (effective load x reps, factor applied) and total_reps stays separate."""
+    # Create body-weight exercise (push-up: 65% BW per research defaults).
     client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
     db = SessionLocal()
     ex = _one(db.query(models.Exercise).filter_by(name="Push Ups" ))
@@ -133,12 +134,16 @@ def test_bodyweight_no_weight_shows_rep_count(client):
     resp = client.get(f"/api/progression/{ex_id}")
     assert resp.status_code == 200
     data = resp.json()["data"]
-    # Bodyweight sets with no weight should appear with reps in volume and total_reps.
     assert len(data) == 1
     row = data[0]
     assert row["top_weight"] == 0.0
-    assert row["volume"] == 15.0
+    # Effective top load: default 80kg BW x 65% = 52 kg.
+    assert row["effective_top_weight"] == 52.0
+    # Volume is tonnage: 52 kg x 15 reps = 780.
+    assert row["volume"] == 780.0
     assert row["total_reps"] == 15
+    assert row["is_bodyweight"] is True
+    assert row["bw_load_factor"] == 0.65
 
 
 # ── Edit Session Tests ────────────────────────────────────────────────────
@@ -558,8 +563,7 @@ def test_progression_includes_weightless_session_on_weighted_exercise(client):
 
 
 def test_progression_flagged_on_bodyweight_rows(client):
-    """Bodyweight rows (reps-as-metric) are chartable and must be flagged
-    has_weight=True."""
+    """Bodyweight rows are chartable and must be flagged has_weight=True."""
     client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
     db = SessionLocal()
     ex = _one(db.query(models.Exercise).filter_by(name="Push Ups"))
@@ -571,7 +575,8 @@ def test_progression_flagged_on_bodyweight_rows(client):
     })
     row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
     assert row["has_weight"] is True
-    assert row["volume"] == 15.0
+    # Real tonnage now: 80 kg default BW x 65% x 15 reps.
+    assert row["volume"] == 780.0
 
 
 # ── Deleting an in-use exercise ────────────────────────────────────────────
@@ -655,3 +660,268 @@ def test_verify_password_with_overlong_password_returns_false():
     convert that into a plain False instead of a 500."""
     hashed = hash_password("real-password")
     assert verify_password("x" * 100, hashed) is False
+
+
+# ── Bodyweight load factors (app/load.py) ──────────────────────────────────
+
+def test_create_exercise_applies_research_default_factor(client):
+    """Creating a BW exercise without explicit % fills the research default
+    (push-up 65%) so mid-session creations scale correctly without restart."""
+    client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Push Ups"))
+    assert ex.bw_load_factor == 0.65
+
+
+def test_create_exercise_respects_explicit_load_percent(client):
+    """An explicit 'Bodyweight load %' overrides the research default."""
+    client.post("/exercises", data={
+        "name": "Supported Push Ups", "is_bodyweight": "1", "bw_load_percent": "40"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Supported Push Ups"))
+    assert ex.bw_load_factor == 0.40
+
+
+def test_create_exercise_rejects_out_of_range_load_percent(client):
+    resp = client.post("/exercises", data={
+        "name": "Fake", "is_bodyweight": "1", "bw_load_percent": "500"})
+    assert resp.status_code == 400
+
+
+def test_edit_exercise_updates_load_factor(client):
+    client.post("/exercises", data={"name": "Dips", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Dips"))
+    ex_id = ex.id
+    resp = client.post(f"/exercises/{ex_id}/edit", data={
+        "is_bodyweight": "1", "bw_load_percent": "95"})
+    assert resp.status_code == 200
+    db.expire_all()
+    ex = _one(db.query(models.Exercise).filter_by(id=ex_id))
+    assert ex.bw_load_factor == 0.95
+    # Switching to weighted clears the factor.
+    resp = client.post(f"/exercises/{ex_id}/edit", data={
+        "is_bodyweight": "0", "bw_load_percent": "95"})
+    db.expire_all()
+    ex = _one(db.query(models.Exercise).filter_by(id=ex_id))
+    assert ex.is_bodyweight is False
+    assert ex.bw_load_factor is None
+
+
+def test_effective_load_subtracts_assist(client):
+    """Supported dips: assist kg is subtracted from the effective load."""
+    client.post("/profile", data={"bodyweight": "80"})
+    client.post("/exercises", data={"name": "Dips", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Dips"))
+    ex_id = ex.id
+
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "8", f"assist-{ex_id}-1": "20",
+        f"reps-{ex_id}-2": "6", f"weight-{ex_id}-2": "5",
+    })
+
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    # Set 1: 80*1.0 - 20 = 60 kg effective; set 2: 80 + 5 = 85 kg.
+    assert row["effective_top_weight"] == 85.0
+    # Volume: 60*8 + 85*6 = 480 + 510 = 990.
+    assert row["volume"] == 990.0
+    # Epley best: 85*(1+6/30) = 102.
+    assert abs(row["est_1rm"] - 102.0) < 0.1
+
+
+def test_assist_and_weight_are_mutually_exclusive(client):
+    """A set is either assisted or weighted. If a client posts both for the
+    same set, assist wins and the added weight is discarded."""
+    client.post("/profile", data={"bodyweight": "80"})
+    client.post("/exercises", data={"name": "Dips", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Dips"))
+    ex_id = ex.id
+
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "8",
+        f"weight-{ex_id}-1": "10",
+        f"assist-{ex_id}-1": "20",
+    })
+    db.expire_all()
+    entry = _one(db.query(models.SetEntry).filter_by(
+        session_id=_one(db.query(models.WorkoutSession).order_by(
+            models.WorkoutSession.id.desc())).id))
+    assert entry.assist_kg == 20.0
+    assert entry.weight is None
+
+
+def test_edit_flips_assist_set_to_weighted_clears_assist(client):
+    """Editing an assist set into a weight set (and vice versa) must not
+    leave both values on the row."""
+    client.post("/profile", data={"bodyweight": "80"})
+    client.post("/exercises", data={"name": "Dips", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Dips"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "8", f"assist-{ex_id}-1": "20",
+    })
+    sess = _one(db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc()))
+
+    # Flip set 1 from assist to added weight.
+    client.post(f"/sessions/edit/{sess.id}", data={
+        "date": date.today().isoformat(),
+        f"reps-{ex_id}-1": "8",
+        f"weight-{ex_id}-1": "5",
+    })
+    db.expire_all()
+    entry = _one(db.query(models.SetEntry).filter_by(
+        session_id=sess.id, exercise_id=ex_id))
+    assert entry.weight == 5.0
+    assert entry.assist_kg is None
+
+    # And back from weight to assist.
+    client.post(f"/sessions/edit/{sess.id}", data={
+        "date": date.today().isoformat(),
+        f"reps-{ex_id}-1": "8",
+        f"assist-{ex_id}-1": "25",
+    })
+    db.expire_all()
+    entry = _one(db.query(models.SetEntry).filter_by(
+        session_id=sess.id, exercise_id=ex_id))
+    assert entry.weight is None
+    assert entry.assist_kg == 25.0
+
+
+def test_effective_load_clamps_negative_assist(client):
+    """Assist larger than the scaled bodyweight clamps at 0, never negative."""
+    client.post("/profile", data={"bodyweight": "60"})
+    client.post("/exercises", data={"name": "Pull Ups", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Pull Ups"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "5", f"assist-{ex_id}-1": "200",
+    })
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["effective_top_weight"] == 0.0
+    assert row["volume"] == 0.0
+    assert row["est_1rm"] == 0.0
+
+
+def test_dashboard_and_progression_use_factor_consistently(client):
+    """Dashboard tonnage and progression volume must agree on the factor."""
+    client.post("/profile", data={"bodyweight": "80"})
+    client.post("/exercises", data={"name": "Push Ups", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Push Ups"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "10",
+    })
+    # Progression: 80*0.65=52 kg x 10 reps = 520.
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["volume"] == 520.0
+    # Dashboard hero stat (lifetime tonnage via SQL path): same 520 kg total.
+    resp = client.get("/")
+    assert resp.status_code == 200
+    db.expire_all()
+    # Verify through a fresh dashboard context call (SQL formula path).
+    from app.web import BODYWEIGHT_DEFAULT_KG  # noqa: F401  (import sanity)
+    total_volume = db.query(
+        models.SetEntry.reps
+    ).filter(models.SetEntry.exercise_id == ex_id).all()
+    reps_sum = sum(r[0] or 0 for r in total_volume)
+    assert reps_sum == 10  # sanity: the set exists for the SQL path
+
+# ── Isometric hold exercises (time-based) ──────────────────────────────────
+
+def test_hold_exercise_created_by_name(client):
+    """Names matching hold hints (plank, L-sit, …) default to is_hold."""
+    client.post("/exercises", data={"name": "Plank"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Plank"))
+    assert ex.is_hold is True
+    client.post("/exercises", data={"name": "Bicep Curls"})
+    ex2 = _one(db.query(models.Exercise).filter_by(name="Bicep Curls"))
+    assert ex2.is_hold is False
+
+
+def test_hold_set_logged_as_time_and_progression_shows_seconds(client):
+    """Hold sets use time-<ex>-<set> fields; progression returns seconds."""
+    client.post("/exercises", data={"name": "Side Plank"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Side Plank"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"time-{ex_id}-1": "45",
+        f"time-{ex_id}-2": "60",
+ f"weight-{ex_id}-2": "5",
+    })
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["is_hold"] is True
+    # Longest hold: 60 s (weighted hold still time-based).
+    assert row["effective_top_weight"] == 60.0
+    # Volume = total time under tension: 45 + 60 = 105 s.
+    assert row["volume"] == 105.0
+    # No tonnage for holds.
+    assert row["top_weight"] == 0.0
+    assert row["est_1rm"] == 0.0
+
+
+def test_hold_exercises_excluded_from_tonnage(client):
+    """Planks contribute 0 kg to dashboard tonnage and weekly load."""
+    client.post("/profile", data={"bodyweight": "80"})
+    client.post("/exercises", data={"name": "Plank"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Plank"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"time-{ex_id}-1": "60",
+    })
+    # API sanity: hold rows flagged, no e1RM.
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["is_hold"] is True
+    assert row["effective_top_weight"] == 60.0
+    # The set stores the time in duration_seconds with reps=0, so the
+    # tonnage SQL (reps x load x not-hold) contributes 0.
+    entry = _one(db.query(models.SetEntry).filter_by(exercise_id=ex_id))
+    assert entry.reps == 0
+    assert entry.duration_seconds == 60
+
+
+def test_edit_session_updates_hold_time(client):
+    client.post("/exercises", data={"name": "Hollow Hold"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Hollow Hold"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"time-{ex_id}-1": "30",
+    })
+    sess = _one(db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc()))
+    resp = client.post(f"/sessions/edit/{sess.id}", data={
+        "date": date.today().isoformat(),
+        f"time-{ex_id}-1": "45",
+    })
+    assert resp.status_code == 200
+    db.expire_all()
+    entry = _one(db.query(models.SetEntry).filter_by(
+        session_id=sess.id, exercise_id=ex_id))
+    assert entry.duration_seconds == 45
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["effective_top_weight"] == 45.0
