@@ -178,15 +178,19 @@
       work.className = 'ghost-row';
       grid.appendChild(numDiv);
       grid.appendChild(work);
-      // Hold rows keep the optional added-weight field (weighted planks).
-      if (!isHold) {
-        var wt = document.createElement('input');
-        wt.type = 'number'; wt.step = '0.5'; wt.min = '0';
+      // Every row keeps the optional load field — for holds it is the
+      // added-weight field (weighted planks), otherwise weight/assist.
+      var wt = document.createElement('input');
+      wt.type = 'number'; wt.step = '0.5'; wt.min = '0';
+      if (isHold) {
+        wt.placeholder = 'Added kg';
+        wt.name = 'weight-' + exId + '-' + n;
+      } else {
         wt.placeholder = asAssist ? 'Assist kg' : 'Added kg';
-        wt.className = 'ghost-row load-input';
         wt.name = (asAssist ? 'assist-' : 'weight-') + exId + '-' + n;
-        grid.appendChild(wt);
       }
+      wt.className = 'ghost-row load-input';
+      grid.appendChild(wt);
     });
   });
 

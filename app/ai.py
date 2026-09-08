@@ -29,6 +29,7 @@ from .load import (
     exercise_load_factor,
     is_bodyweight_name,
     default_bw_load_factor,
+    is_hold_name,
 )
 from .web import (
     BODYWEIGHT_DEFAULT_KG,
@@ -394,6 +395,7 @@ def _match_or_create_exercises(
             name=w.strip(),
             is_bodyweight=bw,
             bw_load_factor=default_bw_load_factor(w) if bw else None,
+            is_hold=is_hold_name(w),
         )
         db.add(ex)
         by_norm[norm] = ex
@@ -709,21 +711,25 @@ async def ai_session_save(
     db.add(workout)
     db.flush()
 
-    # Sets — same reps-<ex_id>-<set> fields POST /sessions/new accepts.
-    for key, value in form.items():
-        if not key.startswith("reps-"):
-            continue
-        try:
-            _, ex_id_str, set_num_str = key.split("-")
-            ex_id = int(ex_id_str)
-            set_num = int(set_num_str)
-        except (ValueError, IndexError):
-            continue
+    # Sets — same reps-/time-<ex_id>-<set> fields POST /sessions/edit
+    # accepts. Hold exercises submit time- (seconds), not reps-, so both
+    # prefixes must seed the pair set or hold rows would be dropped.
+    submitted_pairs: set[tuple[int, int]] = set()
+    for key in form.keys():
+        if key.startswith("reps-") or key.startswith("time-"):
+            try:
+                _, ex_id_str, set_num_str = key.split("-")
+                submitted_pairs.add((int(ex_id_str), int(set_num_str)))
+            except (ValueError, IndexError):
+                continue
+
+    for ex_id, set_num in sorted(submitted_pairs):
+        reps_val = _form_str(form.get(f"reps-{ex_id}-{set_num}"))
         weight_val = _form_str(form.get(f"weight-{ex_id}-{set_num}"))
         assist_val = _form_str(form.get(f"assist-{ex_id}-{set_num}"))
         time_val = _form_str(form.get(f"time-{ex_id}-{set_num}"))
         try:
-            reps = int(_form_str(value)) if _form_str(value) else 0
+            reps = int(reps_val) if reps_val else 0
         except ValueError:
             reps = 0
         try:

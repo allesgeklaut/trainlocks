@@ -42,10 +42,19 @@
     </div>
     <div class="sets-grid">
       <div class="col-header">Set</div>
+      {% if ex.is_hold %}
+      <div class="col-header">Hold (s)</div>
+      <div class="col-header">Added kg</div>
+      {% else %}
       <div class="col-header">Reps</div>
       <div class="col-header">{{ 'Added kg' if ex.is_bodyweight else 'Weight (kg)' }}</div>
+      {% endif %}
       {% for s in re.sets %}
       <div class="set-num">{{ loop.index }}</div>
+      {% if ex.is_hold %}
+      <input type="number" name="time-{{ ex.id }}-{{ loop.index }}" min="0" placeholder="seconds" value="{{ s.duration if s.duration is not none else '' }}" />
+      <input type="number" step="0.5" name="weight-{{ ex.id }}-{{ loop.index }}" min="0" placeholder="Added kg" value="{{ s.weight if s.weight is not none else '' }}" />
+      {% else %}
       <input type="number" name="reps-{{ ex.id }}-{{ loop.index }}" min="0" placeholder="0" value="{{ s.reps }}" />
       {% if ex.is_bodyweight %}
       {# Field name carries the mode: assist sets submit assist-…, weight
@@ -57,11 +66,17 @@
       {% else %}
       <input type="number" step="0.5" name="weight-{{ ex.id }}-{{ loop.index }}" min="0" placeholder="kg" value="{{ s.weight if s.weight is not none else '' }}" />
       {% endif %}
+      {% endif %}
       {% endfor %}
       {% set ghost = (re.sets | length) + 1 %}
       <div class="set-num ghost-row">{{ ghost }}</div>
+      {% if ex.is_hold %}
+      <input type="number" class="ghost-row" name="time-{{ ex.id }}-{{ ghost }}" min="0" placeholder="seconds" />
+      <input type="number" step="0.5" class="ghost-row" name="weight-{{ ex.id }}-{{ ghost }}" min="0" placeholder="Added kg" />
+      {% else %}
       <input type="number" class="ghost-row" name="reps-{{ ex.id }}-{{ ghost }}" min="0" placeholder="0" />
       <input type="number" step="0.5" class="ghost-row" name="weight-{{ ex.id }}-{{ ghost }}" min="0" placeholder="{{ 'Added kg' if ex.is_bodyweight else 'kg' }}" />
+      {% endif %}
     </div>
   </div>
   {% endfor %}
@@ -134,8 +149,8 @@
 
       function nextSetNum() {
         var max = 0;
-        grid.querySelectorAll('input[name^="reps-"]').forEach(function (input) {
-          var m = input.name.match(/reps-\d+-(\d+)/);
+        grid.querySelectorAll('input[name^="reps-"], input[name^="time-"]').forEach(function (input) {
+          var m = input.name.match(/^(?:reps|time)-\d+-(\d+)/);
           if (m) { var n = parseInt(m[1], 10); if (n > max) max = n; }
         });
         return max + 1;
@@ -149,20 +164,32 @@
         if (!t.value) return;
         block.querySelectorAll('.ghost-row').forEach(function (el) { el.classList.remove('ghost-row'); });
         var exId = block.dataset.exId;
-        var isBw = grid.querySelector('input[name^="weight-"]').placeholder === 'Added kg';
+        var isHold = !!grid.querySelector('input[name^="time-"]');
+        var isBw = block.dataset.weighted !== '1';
         var n = nextSetNum();
         var numDiv = document.createElement('div');
         numDiv.className = 'set-num ghost-row';
         numDiv.textContent = n.toString();
-        var reps = document.createElement('input');
-        reps.type = 'number'; reps.min = '0'; reps.placeholder = '0';
-        reps.className = 'ghost-row'; reps.name = 'reps-' + exId + '-' + n;
+        var work = document.createElement('input');
+        work.type = 'number'; work.min = '0';
+        if (isHold) {
+          work.placeholder = 'seconds';
+          work.name = 'time-' + exId + '-' + n;
+        } else {
+          work.placeholder = '0';
+          work.name = 'reps-' + exId + '-' + n;
+        }
+        work.className = 'ghost-row';
         var wt = document.createElement('input');
         wt.type = 'number'; wt.step = '0.5'; wt.min = '0';
-        wt.placeholder = isBw ? 'Added kg' : 'kg';
+        if (isHold || isBw) {
+          wt.placeholder = 'Added kg';
+        } else {
+          wt.placeholder = 'kg';
+        }
         wt.className = 'ghost-row'; wt.name = 'weight-' + exId + '-' + n;
         grid.appendChild(numDiv);
-        grid.appendChild(reps);
+        grid.appendChild(work);
         grid.appendChild(wt);
       });
     });
