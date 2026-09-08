@@ -694,3 +694,42 @@ def test_browse_plans_page_lists_new_programs(client):
     for label in ("GZCLP", "5/3/1 for Beginners", "StrongLifts", "PHUL",
                   "Coolcicada PPL", "BWF Recommended Routine"):
         assert label in resp.text
+
+
+def test_progression_lists_only_exercises_with_sets(client):
+    """The progression dropdown lists only exercises that have at least one
+    recorded set — unused exercises would render empty charts."""
+    _seed(client)
+    client.post("/exercises", data={"name": "Never Logged", "is_bodyweight": "0"})
+    resp = client.get("/progression")
+    assert resp.status_code == 200
+    db = SessionLocal()
+    with_sets = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
+    without = _one(db.query(models.Exercise).filter_by(name="Never Logged"))
+    assert f'value="{with_sets.id}"' in resp.text
+    assert f'value="{without.id}"' not in resp.text
+    db.close()
+
+
+def test_progression_history_newest_first(client):
+    """History table renders newest session first, matching /sessions."""
+    _seed(client)
+    db = SessionLocal()
+    bench = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
+    tpl = _one(db.query(models.SessionTemplate).filter_by(name="Upper Body"))
+    # A second, later session on the same exercise.
+    client.post("/sessions/new", data={
+        "date": "2026-09-01",
+        "template_id": str(tpl.id),
+        f"reps-{bench.id}-1": "5",
+        f"weight-{bench.id}-1": "85",
+    })
+    db.close()
+    resp = client.get(f"/progression?exercise_id={bench.id}")
+    assert resp.status_code == 200
+    # The JS renders data in server order (oldest first) — the table call
+    # reverses. Assert via the API order + JS reverse call in the template.
+    assert "[...data].reverse()" in resp.text
+    api = client.get(f"/api/progression/{bench.id}").json()["data"]
+    dates = [r["date"] for r in api]
+    assert dates == sorted(dates)
