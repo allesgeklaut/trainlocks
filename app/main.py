@@ -171,6 +171,10 @@ with engine.begin() as conn:
     # for these — copy them into duration_seconds so hold semantics apply
     # retroactively. Uses raw f-string interpolation; patterns are a
     # hard-coded tuple, not user input.
+    # NOTE: deliberately narrower than load._HOLD_HINTS — "hold" and
+    # "hanging" are broad substrings that would wrongly flip non-hold
+    # exercises (e.g. "Hanging leg raise" is rep-based, "ankle hold" isn't
+    # an exercise). New exercises get the full hints via is_hold_name().
     hold_patterns = ("plank", "l-sit", "lsit", "hollow", "hang",
                      "front lever", "back lever", "bridge")
     conn.execute(sa_text(
@@ -1027,8 +1031,6 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
             existing.assist_kg = assist
             if assist is not None:
                 existing.weight = None
-            elif weight is not None and existing.assist_kg:
-                existing.assist_kg = None
         else:
             db.add(models.SetEntry(
                 session_id=session_id,
