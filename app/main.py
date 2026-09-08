@@ -193,9 +193,10 @@ with engine.begin() as conn:
     # imports created e.g. "Pull-Up" although "Pullups" already existed
     # (_match_or_create_exercises fuzzy-matches, but import_exercises and
     # import_plan match exact name only). Duplicates fragment progression
-    # history. Canonical mapping: whichever name has set recordings wins;
-    # ties fall back to the lower id. Duplicated rows (no sets anywhere)
-    # keep their template refs; only their dup row is removed.
+    # history. Mapping direction is fixed: the second name is canonical and
+    # survives the merge (chosen here as the spelling that actually holds
+    # the set recordings in practice). Template refs and any sets recorded
+    # under the dup are repointed, then the dup row is removed.
     _DUP_EXERCISE_NAMES: tuple[tuple[str, str], ...] = (
         ("pull-up", "pullups"), ("pull up", "pullups"), ("pull ups", "pullups"),
         ("pullup", "pullups"),
