@@ -189,6 +189,49 @@ with engine.begin() as conn:
             "AND exercise_id IN (SELECT id FROM exercises WHERE is_hold = 1)"
         )
     )
+    # Merge duplicate exercise spellings into one canonical row. Plan/AI
+    # imports created e.g. "Pull-Up" although "Pullups" already existed
+    # (_match_or_create_exercises fuzzy-matches, but import_exercises and
+    # import_plan match exact name only). Duplicates fragment progression
+    # history. Mapping direction is fixed: the second name is canonical and
+    # survives the merge (chosen here as the spelling that actually holds
+    # the set recordings in practice). Template refs and any sets recorded
+    # under the dup are repointed, then the dup row is removed.
+    _DUP_EXERCISE_NAMES: tuple[tuple[str, str], ...] = (
+        ("pull-up", "pullups"), ("pull up", "pullups"), ("pull ups", "pullups"),
+        ("pullup", "pullups"),
+        ("chin-up", "chinups"), ("chin up", "chinups"),
+        ("dip", "dips"),
+        ("push-up", "push ups"), ("push up", "push ups"),
+        ("pushup", "push ups"),
+        ("lunge", "lunges"),
+        ("bodyweight squat", "bodyweight squats"),
+    )
+    for dup_name, canon_name in _DUP_EXERCISE_NAMES:
+        dup = conn.execute(
+            sa_text("SELECT id FROM exercises WHERE lower(name) = :n"),
+            {"n": dup_name},
+        ).first()
+        canon = conn.execute(
+            sa_text("SELECT id FROM exercises WHERE lower(name) = :n"),
+            {"n": canon_name},
+        ).first()
+        if dup is None or canon is None or dup[0] == canon[0]:
+            continue
+        # Move template rows pointing at the dup onto the canonical row,
+        # then drop the dup. Set entries (if any appeared meanwhile) move
+        # too; a UNIQUE clash can't occur because set_numbers are only
+        # unique per (session, exercise) pair — rows merge cleanly.
+        conn.execute(
+            sa_text("UPDATE session_template_exercises SET exercise_id = :c "
+                    "WHERE exercise_id = :d"),
+            {"c": canon[0], "d": dup[0]},
+        )
+        conn.execute(
+            sa_text("UPDATE set_entries SET exercise_id = :c WHERE exercise_id = :d"),
+            {"c": canon[0], "d": dup[0]},
+        )
+        conn.execute(sa_text("DELETE FROM exercises WHERE id = :d"), {"d": dup[0]})
 
 app = FastAPI(title="Training Log Dashboard")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -1048,7 +1091,15 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
 
 @app.get("/progression", response_class=HTMLResponse)
 async def progression(request: Request, user: models.User = Depends(get_current_user), exercise_id: Optional[int] = None, db: Session = Depends(get_db)):
-    exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
+    # Only exercises with at least one recorded set — the rest would render
+    # an empty chart, so listing them is just noise.
+    exercises = (
+        db.query(models.Exercise)
+        .join(models.SetEntry, models.SetEntry.exercise_id == models.Exercise.id)
+        .distinct()
+        .order_by(models.Exercise.name)
+        .all()
+    )
     selected_exercise = db.get(models.Exercise, exercise_id) if exercise_id else None
     return render_page(request, "progression.html", {
         "exercises": exercises, "selected_exercise": selected_exercise, "user": user,

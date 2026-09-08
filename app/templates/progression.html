@@ -211,7 +211,9 @@
       document.getElementById("th-vol").textContent = "Volume (kg tonnage)";
     }
     const max1rm = chartData.length > 0 ? Math.max(...chartData.map(x => x.est_1rm)) : null;
-    data.forEach(r => {
+    // Newest first — matches the order of the /sessions list. (The charts
+    // stay oldest-first; that is how time axes work.)
+    [...data].reverse().forEach(r => {
       const tr = document.createElement("tr");
       if (isHold) {
         const isPr = r.effective_top_weight === Math.max(...chartData.map(x => x.effective_top_weight));
