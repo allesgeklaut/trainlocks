@@ -732,6 +732,71 @@ def test_effective_load_subtracts_assist(client):
     assert abs(row["est_1rm"] - 102.0) < 0.1
 
 
+def test_assist_and_weight_are_mutually_exclusive(client):
+    """A set is either assisted or weighted. If a client posts both for the
+    same set, assist wins and the added weight is discarded."""
+    client.post("/profile", data={"bodyweight": "80"})
+    client.post("/exercises", data={"name": "Dips", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Dips"))
+    ex_id = ex.id
+
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "8",
+        f"weight-{ex_id}-1": "10",
+        f"assist-{ex_id}-1": "20",
+    })
+    db.expire_all()
+    entry = _one(db.query(models.SetEntry).filter_by(
+        session_id=_one(db.query(models.WorkoutSession).order_by(
+            models.WorkoutSession.id.desc())).id))
+    assert entry.assist_kg == 20.0
+    assert entry.weight is None
+
+
+def test_edit_flips_assist_set_to_weighted_clears_assist(client):
+    """Editing an assist set into a weight set (and vice versa) must not
+    leave both values on the row."""
+    client.post("/profile", data={"bodyweight": "80"})
+    client.post("/exercises", data={"name": "Dips", "is_bodyweight": "1"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Dips"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"reps-{ex_id}-1": "8", f"assist-{ex_id}-1": "20",
+    })
+    sess = _one(db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc()))
+
+    # Flip set 1 from assist to added weight.
+    client.post(f"/sessions/edit/{sess.id}", data={
+        "date": date.today().isoformat(),
+        f"reps-{ex_id}-1": "8",
+        f"weight-{ex_id}-1": "5",
+    })
+    db.expire_all()
+    entry = _one(db.query(models.SetEntry).filter_by(
+        session_id=sess.id, exercise_id=ex_id))
+    assert entry.weight == 5.0
+    assert entry.assist_kg is None
+
+    # And back from weight to assist.
+    client.post(f"/sessions/edit/{sess.id}", data={
+        "date": date.today().isoformat(),
+        f"reps-{ex_id}-1": "8",
+        f"assist-{ex_id}-1": "25",
+    })
+    db.expire_all()
+    entry = _one(db.query(models.SetEntry).filter_by(
+        session_id=sess.id, exercise_id=ex_id))
+    assert entry.weight is None
+    assert entry.assist_kg == 25.0
+
+
 def test_effective_load_clamps_negative_assist(client):
     """Assist larger than the scaled bodyweight clamps at 0, never negative."""
     client.post("/profile", data={"bodyweight": "60"})

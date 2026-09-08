@@ -64,35 +64,37 @@
     <div class="sets-grid">
       <div class="col-header">Set</div>
       <div class="col-header">Reps</div>
-      <div class="col-header">{{ 'Added kg' if is_bw else 'Weight (kg)' }}</div>
-      <div class="col-header assist-col" data-ex-id="{{ ex_id }}" style="display:none">Assist kg</div>
+      <div class="col-header load-col-header">
+        {{ 'Added kg' if is_bw else 'Weight (kg)' }}
+      </div>
       {% for s in set_nums %}
       {% set es = existing_sets.get((ex_id, s)) if existing_sets else None %}
       <div class="set-num">{{ s }}</div>
       <input type="number" name="reps-{{ ex_id }}-{{ s }}" min="0" placeholder="0"
         value="{{ es.reps if es else '' }}" />
       {% if is_bw %}
-      <input type="number" step="0.5" name="weight-{{ ex_id }}-{{ s }}" min="0" placeholder="Added kg"
-        value="{{ es.weight if es and es.weight is not none else '' }}" />
+      {# One load input per set. The field NAME carries the mode:
+         weight-... (vest) or assist-... (band/machine) — mutually
+         exclusive by construction, so a set can never be both. #}
+      <input type="number" step="0.5" class="load-input"
+        name="{{ 'assist-' if es and es.assist_kg is not none else 'weight-' }}{{ ex_id }}-{{ s }}"
+        min="0" placeholder="{{ 'Assist kg' if es and es.assist_kg is not none else 'Added kg' }}"
+        value="{{ (es.assist_kg if es.assist_kg is not none else es.weight) if es and (es.assist_kg is not none or es.weight is not none) else '' }}" />
       {% else %}
-      <input type="number" step="0.5" name="weight-{{ ex_id }}-{{ s }}" min="0" placeholder="kg"
+      <input type="number" step="0.5" class="load-input"
+        name="weight-{{ ex_id }}-{{ s }}" min="0" placeholder="kg"
         value="{{ es.weight if es and es.weight is not none else '' }}" />
-      {% endif %}
-      {% if is_bw %}
-      <input type="number" step="0.5" class="assist-input" data-ex-id="{{ ex_id }}"
-        name="assist-{{ ex_id }}-{{ s }}" min="0" placeholder="0" style="display:none"
-        value="{{ es.assist_kg if es and es.assist_kg is not none else '' }}" />
       {% endif %}
       {% endfor %}
       {% set ghost = (set_nums[-1] + 1) if set_nums else 1 %}
       <div class="set-num ghost-row">{{ ghost }}</div>
       <input type="number" class="ghost-row" name="reps-{{ ex_id }}-{{ ghost }}" min="0" placeholder="0" />
       {% if is_bw %}
-      <input type="number" step="0.5" class="ghost-row" name="weight-{{ ex_id }}-{{ ghost }}" min="0" placeholder="Added kg" />
-      <input type="number" step="0.5" class="ghost-row assist-input" data-ex-id="{{ ex_id }}"
-        name="assist-{{ ex_id }}-{{ ghost }}" min="0" placeholder="0" style="display:none" />
+      <input type="number" step="0.5" class="ghost-row load-input bw-load-input"
+        name="weight-{{ ex_id }}-{{ ghost }}" min="0" placeholder="Added kg" />
       {% else %}
-      <input type="number" step="0.5" class="ghost-row" name="weight-{{ ex_id }}-{{ ghost }}" min="0" placeholder="kg" />
+      <input type="number" step="0.5" class="ghost-row load-input"
+        name="weight-{{ ex_id }}-{{ ghost }}" min="0" placeholder="kg" />
       {% endif %}
     </div>
   </div>
@@ -131,10 +133,12 @@
       if (!t.value) return;
       // Promote the whole ghost row.
       block.querySelectorAll('.ghost-row').forEach(function (el) { el.classList.remove('ghost-row'); });
-      // Append a fresh ghost row.
+      // Append a fresh ghost row (3 cells: set number, reps, load). The new
+      // load field inherits the block's current mode via its name prefix.
       var exId = block.dataset.exId;
-      var isBw = !!grid.querySelector('input[name^="assist-"]');
       var n = nextSetNum();
+      var check = block.querySelector('.supported-check');
+      var asAssist = check && check.checked;
       var numDiv = document.createElement('div');
       numDiv.className = 'set-num ghost-row';
       numDiv.textContent = n.toString();
@@ -143,46 +147,52 @@
       reps.className = 'ghost-row'; reps.name = 'reps-' + exId + '-' + n;
       var wt = document.createElement('input');
       wt.type = 'number'; wt.step = '0.5'; wt.min = '0';
-      wt.placeholder = isBw ? 'Added kg' : 'kg';
-      wt.className = 'ghost-row'; wt.name = 'weight-' + exId + '-' + n;
+      wt.placeholder = asAssist ? 'Assist kg' : 'Added kg';
+      wt.className = 'ghost-row load-input';
+      wt.name = (asAssist ? 'assist-' : 'weight-') + exId + '-' + n;
       grid.appendChild(numDiv);
       grid.appendChild(reps);
       grid.appendChild(wt);
-      if (isBw) {
-        // Assist column: visible only when the block is marked supported.
-        var asst = document.createElement('input');
-        asst.type = 'number'; asst.step = '0.5'; asst.min = '0'; asst.placeholder = '0';
-        asst.className = 'ghost-row assist-input';
-        asst.name = 'assist-' + exId + '-' + n;
-        asst.dataset.exId = exId;
-        var assistVisible = block.querySelector('.supported-check') &&
-          block.querySelector('.supported-check').checked;
-        asst.style.display = assistVisible ? '' : 'none';
-        grid.appendChild(asst);
-      }
     });
   });
 
-  // "Supported" toggle: show/hide the per-set assist-kg column for a
-  // bodyweight exercise (supported dips, assisted pull-up machines).
+  // "Supported" toggle for bodyweight exercises: flips every load input of
+  // the block between weight-<ex>-<set> (vest/belt) and assist-<ex>-<set>
+  // (band or machine). One input per set — a set can never be both. Typed
+  // values are cleared on flip (with a confirm if non-zero).
   document.querySelectorAll('.supported-check').forEach(function (check) {
     check.addEventListener('change', function () {
       var exId = check.dataset.exId;
       var block = document.querySelector('.exercise-block[data-ex-id="' + exId + '"]');
       if (!block) return;
-      var assistInputs = block.querySelectorAll('.assist-input');
-      var header = block.querySelector('.assist-col');
-      assistInputs.forEach(function (input) { input.style.display = check.checked ? '' : 'none'; });
-      if (header) header.style.display = check.checked ? '' : 'none';
-      if (!check.checked) {
-        assistInputs.forEach(function (input) { input.value = ''; });
-      }
+      var header = block.querySelector('.load-col-header');
+      var assist = check.checked;
+      var label = assist ? 'Assist kg' : 'Added kg';
+      if (header) header.textContent = label;
+      block.querySelectorAll('.load-input').forEach(function (input) {
+        var m = input.name.match(/^(weight|assist)-(\d+)-(\d+)$/);
+        if (!m) return;
+        var setNum = m[3];
+        var wasAssist = m[1] === 'assist';
+        // Confirm before discarding a non-zero value typed in the other mode.
+        if (assist !== wasAssist && input.value && parseFloat(input.value) !== 0) {
+          if (!window.confirm('Set ' + setNum + ' has a value that will be cleared. Continue?')) {
+            check.checked = !assist;
+            return;
+          }
+          input.value = '';
+        }
+        input.name = (assist ? 'assist-' : 'weight-') + exId + '-' + setNum;
+        input.placeholder = label;
+      });
     });
   });
 })();
 
 // Warn (but don't block) before saving when a weighted exercise has sets
 // with reps but no weight — the usual cause is a forgotten weight entry.
+// Bodyweight exercises are skipped entirely (their load input may be an
+// assist field, which is optional by design).
 (function () {
   var form = document.getElementById('session-form');
   if (!form) return;
