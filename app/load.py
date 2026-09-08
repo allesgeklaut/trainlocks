@@ -67,6 +67,8 @@ BW_LOAD_FACTORS: tuple[tuple[str, float], ...] = (
     ("bodyweight squat", 0.77),
     ("lunge", 0.85),
     ("squat", 0.77),
+    ("hyperextension", 0.70),
+    ("back extension", 0.70),
     ("plank", 0.00),
     ("handstand hold", 1.00),
     ("planche", 1.00),
@@ -83,6 +85,17 @@ _BODYWEIGHT_HINTS = (
     "inverted row", "ring row", "bodyweight row", "bodyweight squat",
     "lunge", "step up",
 )
+
+# Name-pattern -> isometric hold (logged in seconds, not reps).
+_HOLD_HINTS = (
+    "plank", "hold", "l-sit", "lsit", "hollow", "hanging", "hang",
+    "front lever", "back lever", "bridge",
+)
+
+
+def is_hold_name(name: str) -> bool:
+    """True when the name looks like an isometric hold (seconds-based)."""
+    return bw_name_matches(name, _HOLD_HINTS)
 
 
 def bw_name_matches(name: str, patterns) -> bool:
@@ -113,6 +126,15 @@ def exercise_load_factor(exercise: Exercise | None) -> float:
     return float(stored) if stored is not None else 1.0
 
 
+def is_hold_exercise(exercise: Exercise | None) -> bool:
+    """True for isometric hold exercises (planks, hangs, levers): sets are
+    seconds-under-tension, not reps."""
+    if exercise is None:
+        return False
+    stored = getattr(exercise, "is_hold", None)
+    return bool(stored)
+
+
 def effective_load_kg(exercise: Exercise | None,
                       weight: float | None,
                       assist: float | None = None,
@@ -121,8 +143,11 @@ def effective_load_kg(exercise: Exercise | None,
 
     Bodyweight exercises: ``BW * factor + added - assist`` (clamped >= 0).
     Weighted exercises: just ``weight`` (the logged bar/dumbbell load).
+    Hold exercises return 0 (their metric is time, not tonnage).
     ``bodyweight`` falls back to BODYWEIGHT_DEFAULT_KG when unset.
     """
+    if exercise is not None and is_hold_exercise(exercise):
+        return 0.0
     if exercise is not None and exercise.is_bodyweight:
         bw = float(bodyweight) if bodyweight is not None else BODYWEIGHT_DEFAULT_KG
         factor = exercise_load_factor(exercise)
@@ -130,3 +155,28 @@ def effective_load_kg(exercise: Exercise | None,
         assist_kg = float(assist) if assist is not None else 0.0
         return max(0.0, bw * factor + added - assist_kg)
     return float(weight) if weight is not None else 0.0
+
+
+def set_reps_value(exercise: Exercise | None, reps: int | None,
+                   duration_seconds: int | None) -> int:
+    """The chartable 'work count' of a set: hold duration in seconds for
+    isometric holds, otherwise reps. Legacy hold rows logged seconds in
+    reps — they stay chartable."""
+    if exercise is not None and is_hold_exercise(exercise):
+        if duration_seconds is not None:
+            return int(duration_seconds)
+        return int(reps or 0)
+    return int(reps or 0)
+
+
+def set_volume(exercise: Exercise | None, reps: int | None,
+               duration_seconds: int | None,
+               weight: float | None = None,
+               assist: float | None = None,
+               bodyweight: float | None = None) -> float:
+    """Chartable volume of one set: tonnage (effective load x reps) for
+    rep exercises, total seconds under tension for holds (0 kg)."""
+    work = set_reps_value(exercise, reps, duration_seconds)
+    if exercise is not None and is_hold_exercise(exercise):
+        return float(work)
+    return effective_load_kg(exercise, weight, assist, bodyweight) * work

@@ -841,3 +841,87 @@ def test_dashboard_and_progression_use_factor_consistently(client):
     ).filter(models.SetEntry.exercise_id == ex_id).all()
     reps_sum = sum(r[0] or 0 for r in total_volume)
     assert reps_sum == 10  # sanity: the set exists for the SQL path
+
+# ── Isometric hold exercises (time-based) ──────────────────────────────────
+
+def test_hold_exercise_created_by_name(client):
+    """Names matching hold hints (plank, L-sit, …) default to is_hold."""
+    client.post("/exercises", data={"name": "Plank"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Plank"))
+    assert ex.is_hold is True
+    client.post("/exercises", data={"name": "Bicep Curls"})
+    ex2 = _one(db.query(models.Exercise).filter_by(name="Bicep Curls"))
+    assert ex2.is_hold is False
+
+
+def test_hold_set_logged_as_time_and_progression_shows_seconds(client):
+    """Hold sets use time-<ex>-<set> fields; progression returns seconds."""
+    client.post("/exercises", data={"name": "Side Plank"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Side Plank"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"time-{ex_id}-1": "45",
+        f"time-{ex_id}-2": "60",
+ f"weight-{ex_id}-2": "5",
+    })
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["is_hold"] is True
+    # Longest hold: 60 s (weighted hold still time-based).
+    assert row["effective_top_weight"] == 60.0
+    # Volume = total time under tension: 45 + 60 = 105 s.
+    assert row["volume"] == 105.0
+    # No tonnage for holds.
+    assert row["top_weight"] == 0.0
+    assert row["est_1rm"] == 0.0
+
+
+def test_hold_exercises_excluded_from_tonnage(client):
+    """Planks contribute 0 kg to dashboard tonnage and weekly load."""
+    client.post("/profile", data={"bodyweight": "80"})
+    client.post("/exercises", data={"name": "Plank"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Plank"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"time-{ex_id}-1": "60",
+    })
+    # API sanity: hold rows flagged, no e1RM.
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["is_hold"] is True
+    assert row["effective_top_weight"] == 60.0
+    # The set stores the time in duration_seconds with reps=0, so the
+    # tonnage SQL (reps x load x not-hold) contributes 0.
+    entry = _one(db.query(models.SetEntry).filter_by(exercise_id=ex_id))
+    assert entry.reps == 0
+    assert entry.duration_seconds == 60
+
+
+def test_edit_session_updates_hold_time(client):
+    client.post("/exercises", data={"name": "Hollow Hold"})
+    db = SessionLocal()
+    ex = _one(db.query(models.Exercise).filter_by(name="Hollow Hold"))
+    ex_id = ex.id
+    client.post("/sessions/new", data={
+        "date": date.today().isoformat(),
+        "template_id": "",
+        f"time-{ex_id}-1": "30",
+    })
+    sess = _one(db.query(models.WorkoutSession).order_by(
+        models.WorkoutSession.id.desc()))
+    resp = client.post(f"/sessions/edit/{sess.id}", data={
+        "date": date.today().isoformat(),
+        f"time-{ex_id}-1": "45",
+    })
+    assert resp.status_code == 200
+    db.expire_all()
+    entry = _one(db.query(models.SetEntry).filter_by(
+        session_id=sess.id, exercise_id=ex_id))
+    assert entry.duration_seconds == 45
+    row = client.get(f"/api/progression/{ex_id}").json()["data"][0]
+    assert row["effective_top_weight"] == 45.0

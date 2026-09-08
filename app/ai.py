@@ -304,7 +304,8 @@ fences. Schema:
 {{"date": "YYYY-MM-DD or null",
  "exercises": [{{"name": "exercise name",
                 "sets": [{{"reps": <int>, "weight_kg": <number or null>,
-                          "assist_kg": <number or null>}}]}}],
+                          "assist_kg": <number or null>,
+                          "duration_seconds": <int or null>}}]}}],
  "cardio": [{{"activity_type": "running|swimming|cycling|walking|rowing|other",
              "distance_km": <number or null>, "duration_min": <number or null>,
              "notes": "string or null"}}],
@@ -321,6 +322,8 @@ load (vest, belt) — then that number is weight_kg.
 - assist_kg: counterweight/machine support in kilograms (supported dips, \
 assisted pull-up machine stack). Set it to the machine weight that assists \
 the athlete, null when there is no support.
+- duration_seconds: for timed holds (planks, L-sits, hangs, levers) put the \
+hold time in SECONDS here and set reps to null. Convert 1:30 to 90.
 - Cardio: duration_min is the workout time in minutes (convert H:MM:SS or \
 MM:SS, e.g. 0:43:34 -> 43.57). Put extra metrics (pace, heart rate, \
 elevation, calories, cadence, power, location, start time) into the cardio \
@@ -614,9 +617,15 @@ async def ai_session_extract(
                 assist = _coerce_float(s.get("assist_kg"))
             except (TypeError, ValueError):
                 assist = None
-            if reps == 0 and weight is None and assist is None:
+            try:
+                dur_raw = s.get("duration_seconds")
+                duration = int(dur_raw) if dur_raw is not None else None
+            except (TypeError, ValueError):
+                duration = None
+            if reps == 0 and weight is None and assist is None and duration is None:
                 continue
-            sets.append({"reps": reps, "weight": weight, "assist": assist})
+            sets.append({"reps": reps, "weight": weight, "assist": assist,
+                         "duration": duration})
         review_exercises.append({
             "exercise": ex,
             "is_new": name.strip() in created,
@@ -712,6 +721,7 @@ async def ai_session_save(
             continue
         weight_val = _form_str(form.get(f"weight-{ex_id}-{set_num}"))
         assist_val = _form_str(form.get(f"assist-{ex_id}-{set_num}"))
+        time_val = _form_str(form.get(f"time-{ex_id}-{set_num}"))
         try:
             reps = int(_form_str(value)) if _form_str(value) else 0
         except ValueError:
@@ -724,13 +734,18 @@ async def ai_session_save(
             assist = float(assist_val) if assist_val else None
         except ValueError:
             assist = None
-        if reps == 0 and weight is None and assist is None:
+        try:
+            duration = int(time_val) if time_val else None
+        except ValueError:
+            duration = None
+        if reps == 0 and weight is None and assist is None and duration is None:
             continue
         db.add(models.SetEntry(
             session_id=workout.id,
             exercise_id=ex_id,
             set_number=set_num,
             reps=reps,
+            duration_seconds=duration,
             weight=weight,
             assist_kg=assist,
         ))

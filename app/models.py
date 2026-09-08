@@ -14,6 +14,10 @@ class Exercise(Base):
     # …) — see app/load.py. NULL is preserved so unknown exercises keep
     # the legacy full-bodyweight behavior until backfilled.
     bw_load_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Isometric hold exercise (plank, L-sit, hang, handstand hold): sets are
+    # logged as seconds under tension instead of reps. Progression charts
+    # plot total hold time; tonnage doesn't apply.
+    is_hold: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class SessionTemplate(Base):
@@ -75,6 +79,10 @@ class SetEntry(Base):
     exercise_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("exercises.id"))
     set_number: Mapped[int | None] = mapped_column(Integer)
     reps: Mapped[int | None] = mapped_column(Integer)
+    # Isometric holds (planks, L-sits, hangs): reps stores the hold time in
+    # SECONDS and load is tracked as time-under-tension, not tonnage. NULL
+    # for normal rep-based sets. Driven by the exercise-level is_hold flag.
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Counterweight support for BW exercises (supported dips, assisted
     # pull-up machines): kg of bodyweight the machine removes, subtracted

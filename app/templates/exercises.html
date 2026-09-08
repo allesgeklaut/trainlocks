@@ -29,6 +29,10 @@
         <input type="number" id="bw_load_percent" name="bw_load_percent" min="0" max="200" step="1" placeholder="100 = full bodyweight" />
         <small style="color:var(--color-text-muted)">How much of your bodyweight the movement moves (push-up ≈ 65, pull-up ≈ 100). Leave empty for the research default.</small>
       </div>
+      <div class="form-group checkbox-row">
+        <input type="checkbox" id="is_hold" name="is_hold" value="1" />
+        <label for="is_hold">Timed hold (seconds, e.g. plank, L-sit)</label>
+      </div>
       <button type="submit" class="btn btn-primary">Add Exercise</button>
     </form>
   </div>
@@ -44,14 +48,18 @@
           <tr>
             <td>{{ ex.name }}</td>
             <td>
-              {% if ex.is_bodyweight %}
+              {% if ex.is_hold %}
+              <span class="badge badge-bw">Hold (sec)</span>
+              {% elif ex.is_bodyweight %}
               <span class="badge badge-bw">Bodyweight</span>
               {% else %}
               <span class="badge badge-weighted">Weighted</span>
               {% endif %}
             </td>
             <td>
-              {% if ex.is_bodyweight %}
+              {% if ex.is_hold %}
+                time
+              {% elif ex.is_bodyweight %}
                 {% if ex.bw_load_factor is not none %}{{ (ex.bw_load_factor * 100) | round(0) }}%{% else %}100% (default){% endif %}
               {% else %}
                 —
@@ -72,6 +80,11 @@
                   value="{{ (ex.bw_load_factor * 100) | round(0) if ex.bw_load_factor is not none else 100 }}"
                   style="width:100%" />
                 {% endif %}
+                <div class="checkbox-row" style="margin-top:var(--space-2)">
+                  <input type="checkbox" id="hold-{{ ex.id }}" name="is_hold" value="1"
+                    {% if ex.is_hold %}checked{% endif %} />
+                  <label for="hold-{{ ex.id }}">Timed hold (seconds)</label>
+                </div>
                 <button type="submit" class="btn btn-primary btn-sm" style="margin-top:var(--space-2)">Save</button>
               </form>
             </td>
