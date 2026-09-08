@@ -29,6 +29,7 @@
           <th>Set</th>
           <th>Reps</th>
           <th>Weight (kg)</th>
+          <th>Assist (kg)</th>
         </tr>
       </thead>
       <tbody>
@@ -38,6 +39,7 @@
           <td>{{ se.set_number }}</td>
           <td>{{ se.reps }}</td>
           <td>{{ se.weight if se.weight is not none else "—" }}</td>
+          <td>{{ se.assist_kg if se.assist_kg else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>

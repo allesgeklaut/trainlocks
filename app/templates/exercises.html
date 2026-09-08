@@ -24,6 +24,11 @@
         <input type="checkbox" id="is_bodyweight" name="is_bodyweight" value="1" />
         <label for="is_bodyweight">Bodyweight exercise</label>
       </div>
+      <div class="form-group" id="bw-load-group" style="display:none">
+        <label for="bw_load_percent">Bodyweight load %</label>
+        <input type="number" id="bw_load_percent" name="bw_load_percent" min="0" max="200" step="1" placeholder="100 = full bodyweight" />
+        <small style="color:var(--color-text-muted)">How much of your bodyweight the movement moves (push-up ≈ 65, pull-up ≈ 100). Leave empty for the research default.</small>
+      </div>
       <button type="submit" class="btn btn-primary">Add Exercise</button>
     </form>
   </div>
@@ -33,7 +38,7 @@
     {% if exercises %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Name</th><th>Type</th><th></th></tr></thead>
+        <thead><tr><th>Name</th><th>Type</th><th>Load</th><th></th></tr></thead>
         <tbody>
           {% for ex in exercises %}
           <tr>
@@ -46,9 +51,28 @@
               {% endif %}
             </td>
             <td>
+              {% if ex.is_bodyweight %}
+                {% if ex.bw_load_factor is not none %}{{ (ex.bw_load_factor * 100) | round(0) }}%{% else %}100% (default){% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
+              <button type="button" class="btn btn-sm" data-edit-toggle="edit-{{ ex.id }}">Edit</button>
               <form method="post" action="/exercises/{{ ex.id }}/delete" style="display:inline"
                 data-confirm="Delete {{ ex.name }}?">
                 <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+              </form>
+              <form id="edit-{{ ex.id }}" method="post" action="/exercises/{{ ex.id }}/edit"
+                style="display:none;margin-top:var(--space-2);padding:var(--space-2);border:1px solid var(--color-border);border-radius:var(--radius-sm)">
+                <input type="hidden" name="is_bodyweight" value="{{ '1' if ex.is_bodyweight else '0' }}" />
+                {% if ex.is_bodyweight %}
+                <label style="display:block;font-size:var(--font-size-sm);margin-bottom:var(--space-1)">Bodyweight load %</label>
+                <input type="number" name="bw_load_percent" min="0" max="200" step="1"
+                  value="{{ (ex.bw_load_factor * 100) | round(0) if ex.bw_load_factor is not none else 100 }}"
+                  style="width:100%" />
+                {% endif %}
+                <button type="submit" class="btn btn-primary btn-sm" style="margin-top:var(--space-2)">Save</button>
               </form>
             </td>
           </tr>
@@ -65,4 +89,20 @@
     {% endif %}
   </div>
 </div>
+<script>
+  // Show the load-% field only for bodyweight exercises.
+  var bwCheck = document.getElementById('is_bodyweight');
+  var bwLoadGroup = document.getElementById('bw-load-group');
+  if (bwCheck && bwLoadGroup) {
+    var syncBwGroup = function () { bwLoadGroup.style.display = bwCheck.checked ? '' : 'none'; };
+    bwCheck.addEventListener('change', syncBwGroup);
+    syncBwGroup();
+  }
+  document.querySelectorAll('[data-edit-toggle]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var form = document.getElementById(btn.getAttribute('data-edit-toggle'));
+      if (form) form.style.display = form.style.display === 'none' ? '' : 'none';
+    });
+  });
+</script>
 {% endblock %}

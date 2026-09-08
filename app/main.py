@@ -61,6 +61,13 @@ from .web import (
     render_page,
     templates,
 )
+from .load import (
+    BW_LOAD_FACTORS,
+    default_bw_load_factor,
+    effective_load_kg,
+    exercise_load_factor,
+    is_bodyweight_name,
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -113,6 +120,40 @@ with engine.begin() as conn:
         "CREATE INDEX IF NOT EXISTS ix_coach_chat_messages_created_at "
         "ON coach_chat_messages (created_at)"
     ))
+    # Bodyweight load scaling (see app/load.py): exercises.bw_load_factor
+    # stores the %BW each exercise moves (push-up 0.65, pull-up 1.0, …);
+    # set_entries.assist_kg records machine/counterweight support
+    # (supported dips, assisted pull-ups). Add both if missing.
+    try:
+        conn.execute(sa_text("ALTER TABLE exercises ADD COLUMN bw_load_factor FLOAT"))
+    except Exception:
+        pass
+    try:
+        conn.execute(sa_text("ALTER TABLE set_entries ADD COLUMN assist_kg FLOAT"))
+    except Exception:
+        pass
+    try:
+        conn.execute(sa_text("ALTER TABLE session_template_exercises ADD COLUMN prescription VARCHAR"))
+    except Exception:
+        pass
+    try:
+        conn.execute(sa_text("ALTER TABLE session_templates ADD COLUMN description TEXT"))
+    except Exception:
+        pass
+    # Backfill research-default load factors for known bodyweight names.
+    # Pattern order matters (BW_LOAD_FACTORS is most-specific first), so
+    # evaluate in Python and update row-by-row; idempotent — only rows
+    # whose factor is still NULL (or now matching a different pattern via
+    # rename) are touched.
+    for pattern, factor in BW_LOAD_FACTORS:
+        conn.execute(
+            sa_text(
+                "UPDATE exercises SET bw_load_factor = :f "
+                "WHERE bw_load_factor IS NULL AND is_bodyweight = 1 "
+                "AND lower(name) LIKE :p"
+            ),
+            {"f": factor, "p": f"%{pattern}%"},
+        )
 
 app = FastAPI(title="Training Log Dashboard")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -379,22 +420,21 @@ def _dashboard_context(user: models.User, db: Session, weeks: int) -> dict:
         .order_by(models.WorkoutSession.date)
         .all()
     )
-    # Build weekly training load: sum(weight * reps) per ISO week.
-    # Mirrors the lifetime-tonnage query below (bodyweight + added kg for
-    # bodyweight lifts, unmeasured weight counts as 0) so hero stats and
-    # chart tell the same story.
+    # Build weekly training load: sum(effective_load * reps) per ISO week.
+    # Mirrors the lifetime-tonnage query below (bodyweight-exercise load =
+    # BW * factor + added kg − assist, per app/load.py; unmeasured weight
+    # counts as 0) so hero stats and chart tell the same story.
     weekly_load = defaultdict(float)
     bodyweight_kg = user.bodyweight or BODYWEIGHT_DEFAULT_KG
     for sess in recent_sessions_full:
         week_key = _iso_week_key(sess.date or date.today())
         for set_entry in sess.sets:
-            is_bodyweight = bool(set_entry.exercise and set_entry.exercise.is_bodyweight)
-            if is_bodyweight:
-                # Bodyweight lifts count as bodyweight + any added kg (vest, belt).
-                weight = bodyweight_kg + (set_entry.weight or 0.0)
-            else:
-                # Unmeasured barbell weight can't be counted toward tonnage.
-                weight = set_entry.weight or 0.0
+            weight = effective_load_kg(
+                set_entry.exercise,
+                set_entry.weight,
+                set_entry.assist_kg,
+                bodyweight_kg,
+            )
             weekly_load[week_key] += weight * (set_entry.reps or 0)
 
     # Cardio load per ISO week: distance scaled by per-activity effort factor
@@ -442,15 +482,18 @@ def _dashboard_context(user: models.User, db: Session, weeks: int) -> dict:
         streak_cursor -= timedelta(weeks=1)
 
     # Same semantics as the weekly-load loop above: bodyweight exercises
-    # contribute the viewer's bodyweight + added kg, unmeasured weight
-    # counts as 0. Sessions carry no user_id (single-athlete data model),
-    # so the viewer's own bodyweight is used rather than joining users.
+    # contribute BW * factor + added kg − assist (app/load.py), unmeasured
+    # weight counts as 0. Sessions carry no user_id (single-athlete data
+    # model), so the viewer's own bodyweight is used rather than joining users.
     bodyweight_kg = user.bodyweight or BODYWEIGHT_DEFAULT_KG
     total_volume = (
         db.query(func.coalesce(func.sum(
             (
                 func.coalesce(models.SetEntry.weight, 0.0)
-                + func.coalesce(models.Exercise.is_bodyweight, False).cast(Boolean) * bodyweight_kg
+                + func.coalesce(models.Exercise.is_bodyweight, False).cast(Boolean) * (
+                    bodyweight_kg * func.coalesce(models.Exercise.bw_load_factor, 1.0)
+                )
+                - func.coalesce(models.SetEntry.assist_kg, 0.0)
             ) * func.coalesce(models.SetEntry.reps, 0)
         ), 0.0))
         .join(models.WorkoutSession, models.SetEntry.session_id == models.WorkoutSession.id)
@@ -501,16 +544,72 @@ async def list_exercises(request: Request, user: models.User = Depends(get_curre
 async def create_exercise(
     name: str = Form(...),
     is_bodyweight: Optional[str] = Form(None),
+    bw_load_percent: Optional[str] = Form(None),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     existing = db.query(models.Exercise).filter(models.Exercise.name == name.strip()).first()
     if existing:
         raise HTTPException(status_code=400, detail="Exercise already exists")
-    ex = models.Exercise(name=name.strip(), is_bodyweight=(is_bodyweight == "1"))
+    bodyweight = is_bodyweight == "1"
+    # Empty field -> research default for known BW names (app/load.py), so
+    # exercises created mid-session still scale correctly without a restart.
+    factor = _parse_bw_load_percent(bw_load_percent)
+    if bodyweight and factor is None:
+        factor = default_bw_load_factor(name.strip())
+    ex = models.Exercise(
+        name=name.strip(),
+        is_bodyweight=bodyweight,
+        bw_load_factor=factor if bodyweight else None,
+    )
     db.add(ex)
     db.commit()
     return RedirectResponse(url="/exercises", status_code=303)
+
+
+@app.post("/exercises/{exercise_id}/edit")
+async def edit_exercise(
+    exercise_id: int,
+    is_bodyweight: Optional[str] = Form(None),
+    bw_load_percent: Optional[str] = Form(None),
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update an exercise's bodyweight flag and load-scaling percentage.
+
+    The name is intentionally not editable: it is the unique key other
+    rows (set entries, template rows) reference by id, and renaming
+    through this form has no demand.
+    """
+    ex = db.get(models.Exercise, exercise_id)
+    if not ex:
+        raise HTTPException(status_code=404)
+    bodyweight = is_bodyweight == "1"
+    factor = _parse_bw_load_percent(bw_load_percent)
+    ex.is_bodyweight = bodyweight
+    ex.bw_load_factor = factor if bodyweight else None
+    db.commit()
+    return RedirectResponse(url="/exercises", status_code=303)
+
+
+def _parse_bw_load_percent(raw: Optional[str]) -> Optional[float]:
+    """Parse a 'Bodyweight load %' form value (e.g. '65') into a factor.
+
+    Empty/None -> None (use the research default). Rejects non-numeric
+    and out-of-range values; 0 is allowed (plank-family holds).
+    """
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        percent = float(raw)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Bodyweight load % must be a number")
+    if not (0 <= percent <= 200) or not math.isfinite(percent):
+        raise HTTPException(status_code=400, detail="Bodyweight load % must be between 0 and 200")
+    return percent / 100.0
 
 
 @app.post("/exercises/{exercise_id}/delete")
@@ -651,6 +750,7 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
             continue
 
         weight_val = _form_str(form.get(f"weight-{ex_id}-{set_num}"))
+        assist_val = _form_str(form.get(f"assist-{ex_id}-{set_num}"))
         try:
             reps = int(_form_str(value)) if _form_str(value) else 0
         except ValueError:
@@ -659,8 +759,12 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
             weight = float(weight_val) if weight_val else None
         except ValueError:
             weight = None
+        try:
+            assist = float(assist_val) if assist_val else None
+        except ValueError:
+            assist = None
 
-        if reps == 0 and weight is None:
+        if reps == 0 and weight is None and assist is None:
             continue
 
         db.add(models.SetEntry(
@@ -669,6 +773,7 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
             set_number=set_num,
             reps=reps,
             weight=weight,
+            assist_kg=assist,
         ))
 
     db.commit()
@@ -811,6 +916,7 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
     for ex_id, set_num in submitted_pairs:
         reps_val = _form_str(form.get(f"reps-{ex_id}-{set_num}", ""))
         weight_val = _form_str(form.get(f"weight-{ex_id}-{set_num}", ""))
+        assist_val = _form_str(form.get(f"assist-{ex_id}-{set_num}", ""))
 
         try:
             reps = int(reps_val) if reps_val else 0
@@ -822,9 +928,14 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
         except ValueError:
             weight = None
 
+        try:
+            assist = float(assist_val) if assist_val else None
+        except ValueError:
+            assist = None
+
         existing = rows_by_key.get((ex_id, set_num))
 
-        if reps == 0 and weight is None:
+        if reps == 0 and weight is None and assist is None:
             if existing:
                 db.delete(existing)
             continue
@@ -832,6 +943,7 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
         if existing:
             existing.reps = reps
             existing.weight = weight
+            existing.assist_kg = assist
         else:
             db.add(models.SetEntry(
                 session_id=session_id,
@@ -839,6 +951,7 @@ async def edit_session(session_id: int, request: Request, user: models.User = De
                 set_number=set_num,
                 reps=reps,
                 weight=weight,
+                assist_kg=assist,
             ))
 
     db.commit()
@@ -1057,39 +1170,46 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
             continue
         exercise = sets[0].exercise
         is_bodyweight = bool(exercise and exercise.is_bodyweight)
-        # Effective load per set: bodyweight lifts count bodyweight + any
-        # added kg (vest, belt); weighted lifts count the logged weight only.
-        base_kg = bodyweight_kg if is_bodyweight else 0.0
+        # Effective load per set (app/load.py): bodyweight lifts count
+        # BW * factor + added kg − assist; weighted lifts count the
+        # logged weight only.
+        base_kg = (
+            bodyweight_kg * exercise_load_factor(exercise)
+            if is_bodyweight else 0.0
+        )
 
-        # Separate weighted sets from bodyweight-only sets.
+        # Weighted entries: sets with an added/logged weight. Bodyweight
+        # sets may still carry assist (supported) without added weight.
         weighted_sets = [s for s in sets if s.weight is not None]
         bw_sets = [s for s in sets if s.weight is None and is_bodyweight]
 
-        # For bodyweight-only sessions (no weight at all), still include them
-        # using total_reps as the primary metric.
+        # Every session here has at least one set, so there is always a
+        # chartable metric: weighted exercises use their added weight,
+        # bodyweight exercises always produce an effective load.
         if weighted_sets:
             has_weight = True
             top_weight = max((s.weight or 0.0) for s in weighted_sets)
-            volume = sum((s.weight or 0.0) * (s.reps or 0) for s in weighted_sets)
         elif bw_sets:
-            # Bodyweight exercise with no added weight – use reps as metric.
             has_weight = True
             top_weight = 0.0
-            volume = sum(s.reps or 0 for s in bw_sets)  # use volume column for total reps when BW
         else:
             # Weighted exercise whose sets were logged without a weight
             # (e.g. weight forgotten). Keep the session visible in history
             # but flag it so the charts can exclude it.
             has_weight = False
             top_weight = 0.0
-            volume = 0.0
 
         # Effective (chartable) load and Epley estimated 1RM over the best
         # set: w * (1 + reps/30). Bodyweight rows use effective load so the
         # chart shows real load instead of a flat zero line.
         if has_weight:
             chartable = sets if is_bodyweight else weighted_sets
-            eff_loads = [base_kg + (s.weight or 0.0) for s in chartable]
+            eff_loads = [
+                effective_load_kg(
+                    exercise, s.weight, s.assist_kg, bodyweight_kg
+                )
+                for s in chartable
+            ]
             eff_top = max(eff_loads)
             est_1rm = max(
                 e * (1.0 + (s.reps or 0) / 30.0)
@@ -1098,6 +1218,14 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
         else:
             eff_top = 0.0
             est_1rm = 0.0
+
+        # Volume is tonnage in kg: effective load × reps for every set
+        # (bodyweight rows included — real tonnage, not a rep count).
+        volume = sum(
+            effective_load_kg(exercise, s.weight, s.assist_kg, bodyweight_kg)
+            * (s.reps or 0)
+            for s in sets
+        )
 
         total_reps = sum(s.reps or 0 for s in sets)
         rows.append({
@@ -1109,6 +1237,7 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
             "total_reps": total_reps,
             "has_weight": has_weight,
             "is_bodyweight": is_bodyweight,
+            "bw_load_factor": exercise_load_factor(exercise) if is_bodyweight else None,
         })
     return JSONResponse({"data": rows})
 
@@ -1117,7 +1246,12 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
 async def api_list_exercises(user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
     exercises = db.query(models.Exercise).order_by(models.Exercise.name).all()
     return [
-        {"id": e.id, "name": e.name, "is_bodyweight": bool(e.is_bodyweight)}
+        {
+            "id": e.id,
+            "name": e.name,
+            "is_bodyweight": bool(e.is_bodyweight),
+            "bw_load_factor": exercise_load_factor(e) if e.is_bodyweight else None,
+        }
         for e in exercises
     ]
 
@@ -1129,11 +1263,13 @@ async def api_list_templates(user: models.User = Depends(get_current_user), db: 
         {
             "id": t.id,
             "name": t.name,
+            "description": t.description,
             "exercises": [
                 {
                     "exercise_id": te.exercise_id,
                     "name": te.exercise.name if te.exercise else "",
                     "sets": te.sets,
+                    "prescription": te.prescription,
                     "order": te.order,
                 }
                 for te in t.exercises
@@ -1196,6 +1332,7 @@ async def api_get_session(
                 "set_number": s.set_number,
                 "reps": s.reps,
                 "weight": s.weight,
+                "assist_kg": s.assist_kg,
             }
             for s in sets
         ],
@@ -1412,9 +1549,16 @@ async def import_exercises(request: Request, user: models.User = Depends(get_cur
     for name in names:
         if not name:
             continue
+        name = _form_str(name)
         existing = db.query(models.Exercise).filter(models.Exercise.name == name).first()
         if not existing:
-            db.add(models.Exercise(name=name, is_bodyweight=(name in bw_set)))
+            bodyweight = name in bw_set
+            factor = default_bw_load_factor(name) if bodyweight else None
+            db.add(models.Exercise(
+                name=name,
+                is_bodyweight=bodyweight,
+                bw_load_factor=factor,
+            ))
             imported += 1
     db.commit()
     return RedirectResponse(url=f"/exercises?imported={imported}", status_code=303)
@@ -1452,16 +1596,23 @@ async def import_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    # Create or find each exercise
+    # Create or find each exercise. New exercises detect their bodyweight
+    # status from the name (hints + research load factor, app/load.py) so
+    # imported plans scale correctly without manual fixes.
     order = 1
     exercise_ids = []
     for item in plan["exercises"]:
         ex = db.query(models.Exercise).filter(models.Exercise.name == item["name"]).first()
         if not ex:
-            ex = models.Exercise(name=item["name"], is_bodyweight=False)
+            bodyweight = is_bodyweight_name(item["name"])
+            ex = models.Exercise(
+                name=item["name"],
+                is_bodyweight=bodyweight,
+                bw_load_factor=default_bw_load_factor(item["name"]) if bodyweight else None,
+            )
             db.add(ex)
             db.flush()
-        exercise_ids.append((ex.id, item["sets"], order))
+        exercise_ids.append((ex.id, item.get("sets"), item.get("prescription"), order))
         order += 1
 
     # Create template (avoid duplicate names)
@@ -1472,15 +1623,16 @@ async def import_plan(
         name = f"{base_name} ({i})"
         i += 1
 
-    tpl = models.SessionTemplate(name=name)
+    tpl = models.SessionTemplate(name=name, description=plan.get("description"))
     db.add(tpl)
     db.flush()
 
-    for ex_id, sets, ord_ in exercise_ids:
+    for ex_id, sets, prescription, ord_ in exercise_ids:
         db.add(models.SessionTemplateExercise(
             session_template_id=tpl.id,
             exercise_id=ex_id,
             sets=sets,
+            prescription=prescription,
             order=ord_,
         ))
 

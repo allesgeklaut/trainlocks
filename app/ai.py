@@ -24,6 +24,12 @@ from sqlalchemy.orm import Session
 from . import llm as llm_mod
 from . import models
 from .auth import get_current_user, get_db
+from .load import (
+    effective_load_kg,
+    exercise_load_factor,
+    is_bodyweight_name,
+    default_bw_load_factor,
+)
 from .web import (
     BODYWEIGHT_DEFAULT_KG,
     _form_str,
@@ -97,10 +103,17 @@ def _training_context(user: models.User, db: Session) -> str:
             parts = []
             for se in sorted(s.sets, key=lambda x: (x.exercise_id, x.set_number)):
                 ex = se.exercise.name if se.exercise else "?"
-                if se.weight is not None or not (se.exercise and se.exercise.is_bodyweight):
-                    parts.append(f"{ex}: {se.weight if se.weight is not None else 0}kg x {se.reps}")
+                is_bw = bool(se.exercise and se.exercise.is_bodyweight)
+                if se.weight is not None or not is_bw:
+                    bits = [f"{se.weight if se.weight is not None else 0}kg"]
                 else:
-                    parts.append(f"{ex}: BW x {se.reps}")
+                    # Bodyweight: show %BW actually moved (e.g. "65%BW")
+                    # so the coach reasons about real load, not a flat BW.
+                    bits = [f"{round(exercise_load_factor(se.exercise) * 100)}%BW"]
+                if se.assist_kg:
+                    bits.append(f"-{se.assist_kg}kg assist")
+                bits.append(f"x {se.reps}")
+                parts.append(f"{ex}: {' '.join(bits)}")
             for c in s.cardio:
                 bits = [c.activity_type]
                 if c.distance_km:
@@ -125,8 +138,9 @@ def _training_context(user: models.User, db: Session) -> str:
     for s in sessions_window:
         key = _iso_week_key(s.date or date.today())
         for se in s.sets:
-            is_bw = bool(se.exercise and se.exercise.is_bodyweight)
-            weight = (bodyweight + (se.weight or 0.0)) if is_bw else (se.weight or 0.0)
+            weight = effective_load_kg(
+                se.exercise, se.weight, se.assist_kg, bodyweight
+            )
             weekly_load[key] = weekly_load.get(key, 0.0) + weight * (se.reps or 0)
         for c in s.cardio:
             if c.distance_km:
@@ -289,7 +303,8 @@ fences. Schema:
 
 {{"date": "YYYY-MM-DD or null",
  "exercises": [{{"name": "exercise name",
-                "sets": [{{"reps": <int>, "weight_kg": <number or null>}}]}}],
+                "sets": [{{"reps": <int>, "weight_kg": <number or null>,
+                          "assist_kg": <number or null>}}]}}],
  "cardio": [{{"activity_type": "running|swimming|cycling|walking|rowing|other",
              "distance_km": <number or null>, "duration_min": <number or null>,
              "notes": "string or null"}}],
@@ -301,7 +316,11 @@ partial date (e.g. "Wed 2. Sep", "Sep 2", "yesterday"), resolve it to the \
 most recent matching date in the past and output full YYYY-MM-DD. Only use \
 null when no date information at all is visible.
 - reps are integers; weight_kg is in kilograms (convert lb: /2.2046, round to 0.5).
-- For bodyweight exercises set weight_kg to null.
+- For bodyweight exercises set weight_kg to null, unless the log shows added \
+load (vest, belt) — then that number is weight_kg.
+- assist_kg: counterweight/machine support in kilograms (supported dips, \
+assisted pull-up machine stack). Set it to the machine weight that assists \
+the athlete, null when there is no support.
 - Cardio: duration_min is the workout time in minutes (convert H:MM:SS or \
 MM:SS, e.g. 0:43:34 -> 43.57). Put extra metrics (pace, heart rate, \
 elevation, calories, cadence, power, location, start time) into the cardio \
@@ -339,11 +358,6 @@ def _norm_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
 
 
-_BODYWEIGHT_HINTS = ("pull up", "pullup", "pull-up", "push up", "pushup", "push-up",
-                     "dip", "muscle up", "pistol squat", "planche", "human flag",
-                     "handstand push", "chin up", "chinup", "chin-up")
-
-
 def _match_or_create_exercises(
     db: Session, wanted: list[str]
 ) -> tuple[dict[str, models.Exercise], list[str]]:
@@ -372,8 +386,12 @@ def _match_or_create_exercises(
         if close:
             mapping[w] = by_norm[close[0]]
             continue
-        bw = any(t in norm for t in _BODYWEIGHT_HINTS)
-        ex = models.Exercise(name=w.strip(), is_bodyweight=bw)
+        bw = is_bodyweight_name(w)
+        ex = models.Exercise(
+            name=w.strip(),
+            is_bodyweight=bw,
+            bw_load_factor=default_bw_load_factor(w) if bw else None,
+        )
         db.add(ex)
         by_norm[norm] = ex
         by_lower[w.lower()] = ex
@@ -592,9 +610,13 @@ async def ai_session_extract(
                 weight = _coerce_float(s.get("weight_kg"))
             except (TypeError, ValueError):
                 weight = None
-            if reps == 0 and weight is None:
+            try:
+                assist = _coerce_float(s.get("assist_kg"))
+            except (TypeError, ValueError):
+                assist = None
+            if reps == 0 and weight is None and assist is None:
                 continue
-            sets.append({"reps": reps, "weight": weight})
+            sets.append({"reps": reps, "weight": weight, "assist": assist})
         review_exercises.append({
             "exercise": ex,
             "is_new": name.strip() in created,
@@ -689,6 +711,7 @@ async def ai_session_save(
         except (ValueError, IndexError):
             continue
         weight_val = _form_str(form.get(f"weight-{ex_id}-{set_num}"))
+        assist_val = _form_str(form.get(f"assist-{ex_id}-{set_num}"))
         try:
             reps = int(_form_str(value)) if _form_str(value) else 0
         except ValueError:
@@ -697,7 +720,11 @@ async def ai_session_save(
             weight = float(weight_val) if weight_val else None
         except ValueError:
             weight = None
-        if reps == 0 and weight is None:
+        try:
+            assist = float(assist_val) if assist_val else None
+        except ValueError:
+            assist = None
+        if reps == 0 and weight is None and assist is None:
             continue
         db.add(models.SetEntry(
             session_id=workout.id,
@@ -705,6 +732,7 @@ async def ai_session_save(
             set_number=set_num,
             reps=reps,
             weight=weight,
+            assist_kg=assist,
         ))
 
     # Cardio entries checked in the review form. The loop keys off the
