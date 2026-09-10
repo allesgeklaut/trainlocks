@@ -467,9 +467,22 @@ def _ocr_payload_from_lines(lines: list, today: date) -> dict[str, Any]:
 
 
 def _ocr_extract(raw: bytes, today: date) -> dict[str, Any]:
-    """Run the OCR engine + layout parser; raises OCRError on failure."""
+    """Run the OCR engine + layout parser; raises OCRError on failure.
+
+    Runs in a worker thread from the route (the engine holds a GIL-heavy
+    onnxruntime session); tests monkeypatch this with an async fake, so
+    :func:`_run_ocr_extract` awaits whichever shape it finds.
+    """
     lines = ocr_mod.ocr_image(raw)
     return _ocr_payload_from_lines(lines, today)
+
+
+async def _run_ocr_extract(raw: bytes, today: date) -> dict[str, Any]:
+    """Await OCR extraction, thread-offloading the sync implementation."""
+    result = _ocr_extract(raw, today)
+    if asyncio.iscoroutine(result):
+        return await result
+    return await asyncio.to_thread(lambda: result)
 
 
 @router.get("/sessions/ai", response_class=HTMLResponse)
@@ -602,7 +615,7 @@ async def ai_session_extract(
 
     if use_ocr:
         try:
-            data = await asyncio.to_thread(_ocr_extract, raw, date.today())
+            data = await _run_ocr_extract(raw, date.today())
         except ocr_mod.OCRError as e:
             return render_page(request, "ai_session.html", {
                 "user": user,
