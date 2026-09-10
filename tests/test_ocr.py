@@ -212,9 +212,63 @@ class TestParseOcrLayout:
         assert data["cardio"][0]["distance_km"] == 6.4
         assert abs(data["cardio"][0]["duration_min"] - 43.57) < 0.01
 
-    def test_notes_become_pending_then_dropped(self):
-        # A trailing words-only line with no numbers and no pending name
-        # becomes an empty exercise that is dropped (not a note).
+    def test_apple_watch_summary_card(self):
+        """Apple-Watch-style summary card: label/value grid -> cardio entry
+        + notes with title, context and all metrics; UI noise excluded."""
+        lines = [
+            _line("WLAN Call", 5, x0=7, x1=70),
+            _line("08:14", 5, x0=336, x1=380),
+            _line("% 86", 3, x0=618, x1=650),
+            _line("Thu 10. Sep", 61, x0=275, x1=390),
+            _line("Outdoor Run", 176, x0=214, x1=360),
+            _line("Easy run", 217, x0=212, x1=310),
+            _line("06:52-07:43", 279, x0=214, x1=330),
+            _line("Graz", 320, x0=211, x1=270),
+            _line("Workout Details >", 443, x0=29, x1=180),
+            _line("Workout Time", 530, x0=56, x1=170),
+            _line("Distance", 528, x0=400, x1=490),
+            _line("0:50:38", 575, x0=56, x1=140),
+            _line("6,42KM", 574, x0=398, x1=470),
+            _line("Active Kilocalories", 681, x0=58, x1=230),
+            _line("Total Kilocalories", 678, x0=401, x1=570),
+            _line("560KCAL", 725, x0=56, x1=140),
+            _line("660KCAL", 723, x0=400, x1=490),
+            _line("Avg Power", 830, x0=55, x1=150),
+            _line("Avg Cadence", 828, x0=400, x1=510),
+            _line("202w", 872, x0=54, x1=110),
+            _line("140SPM", 874, x0=401, x1=480),
+            _line("Avg Pace", 979, x0=55, x1=140),
+            _line("Avg Heart Rate", 978, x0=400, x1=540),
+            _line("7'53\"/KM", 1022, x0=53, x1=140),
+            _line("139BPM", 1024, x0=400, x1=480),
+            _line("Summary", 1243, x0=83, x1=150),
+            _line("Fitness+", 1244, x0=249, x1=320),
+            _line("Workout", 1244, x0=407, x1=480),
+            _line("Sharing", 1242, x0=567, x1=640),
+        ]
+        data = parse_ocr_layout(lines, date(2026, 9, 10))
+        # UI noise never becomes an exercise ("WLAN Call" was the old bug).
+        assert data["exercises"] == []
+        # Cardio entry synthesized from the card metrics.
+        assert len(data["cardio"]) == 1
+        c = data["cardio"][0]
+        assert c["activity_type"] == "running"
+        assert c["distance_km"] == 6.42
+        assert abs(c["duration_min"] - 50.63) < 0.02
+        assert "Graz" in (c["notes"] or "")
+        # Notes: title + context + metrics in fixed order, no UI noise.
+        notes = data["notes"]
+        assert notes.startswith("Outdoor Run")
+        for bit in ["Easy run", "Graz", "06:52-07:43", "time 0:50:38",
+                    "distance 6,42KM", "avg pace", "139BPM", "202w",
+                    "140SPM", "560KCAL", "660KCAL"]:
+            assert bit in notes, bit
+        for absent in ["WLAN", "Summary", "Sharing", "Fitness+", "Workout Details"]:
+            assert absent not in notes, absent
+
+    def test_trailing_words_line_becomes_notes(self):
+        # Words-only lines with no numbers become session notes (not empty
+        # exercises) since the summary-card work.
         lines = [
             _line("Bench Press", 80, x0=20, x1=150),
             _line("80kg x 10", 80, x0=350, x1=470),
@@ -222,7 +276,8 @@ class TestParseOcrLayout:
         ]
         data = parse_ocr_layout(lines, date(2026, 9, 10))
         assert len(data["exercises"]) == 1
-        assert data["notes"] is None
+        assert data["notes"] is not None
+        assert "Felt strong today" in data["notes"]
 
     def test_empty_input(self):
         data = parse_ocr_layout([], date(2026, 9, 10))
