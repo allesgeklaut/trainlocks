@@ -215,7 +215,12 @@ class TestParseOcrLayout:
 
     def test_apple_watch_summary_card(self):
         """Apple-Watch-style summary card: label/value grid -> cardio entry
-        + notes with title, context and all metrics; UI noise excluded."""
+        + notes with title, context and all metrics; UI noise excluded.
+
+        The stray "3" (a page-dot/segment remnant in real screenshots) used
+        to parse as bare reps and attach to a leaked pending name, turning
+        the cardio card into a bogus strength exercise — see the summary-card
+        metrics regression."""
         lines = [
             _line("WLAN Call", 5, x0=7, x1=70),
             _line("08:14", 5, x0=336, x1=380),
@@ -242,6 +247,7 @@ class TestParseOcrLayout:
             _line("Avg Heart Rate", 978, x0=400, x1=540),
             _line("7'53\"/KM", 1022, x0=53, x1=140),
             _line("139BPM", 1024, x0=400, x1=480),
+            _line("3", 1192, x0=430, x1=476),
             _line("Summary", 1243, x0=83, x1=150),
             _line("Fitness+", 1244, x0=249, x1=320),
             _line("Workout", 1244, x0=407, x1=480),
