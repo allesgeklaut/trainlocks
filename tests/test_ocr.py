@@ -466,6 +466,26 @@ class TestEngineSelection:
             notes="ocr session"))
         assert sess.sets[0].weight == 60.0
 
+    def test_cardio_only_review_says_cardio_session(self, client, monkeypatch):
+        """A cardio-only OCR extract states it will be saved as a cardio
+        session — the user's run screenshot read like a strength log
+        otherwise."""
+        async def fake_extract(raw, today):
+            return {"date": None, "exercises": [],
+                    "cardio": [{"activity_type": "running",
+                                "distance_km": 6.42, "duration_min": 50.63,
+                                "notes": "Easy run Graz"}],
+                    "notes": "Outdoor Run"}
+
+        import app.ai as ai_mod
+        monkeypatch.setattr(ai_mod, "_ocr_extract", fake_extract)
+        r = self._post(client, "ocr")
+        token = r.headers["location"].split("t=", 1)[1]
+        review = client.get(f"/sessions/ai/review?t={token}")
+        assert review.status_code == 200
+        assert "cardio session" in review.text
+        assert "no strength sets were found" in review.text
+
     def test_engine_picker_on_upload_page(self, client):
         r = client.get("/sessions/ai")
         assert r.status_code == 200

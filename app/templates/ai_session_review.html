@@ -85,7 +85,9 @@
   <div class="card">
     <div class="card-title">AI-detected cardio</div>
     <p style="font-size:var(--text-sm);color:var(--color-text-muted)">
-      Saved together with the session. Uncheck what you don't want.
+      {% if not review_exercises %}This will be saved as a <strong>cardio
+      session</strong> (no strength sets were found in the screenshot).
+      {% endif %}Saved together with the session. Uncheck what you don't want.
     </p>
     {% for c in ai_cardio %}
     <div class="ai-cardio-entry">
