@@ -5,6 +5,7 @@ The real RapidOCR engine is never loaded in tests — ocr_image is mocked;
 the layout parser is tested directly with synthetic OcrLine fixtures."""
 
 import json
+import re
 from datetime import date, timedelta
 
 import pytest
@@ -483,8 +484,10 @@ class TestEngineSelection:
         token = r.headers["location"].split("t=", 1)[1]
         review = client.get(f"/sessions/ai/review?t={token}")
         assert review.status_code == 200
-        assert "cardio session" in review.text
-        assert "no strength sets were found" in review.text
+        # HTML may wrap "cardio session" across lines — collapse whitespace.
+        flat = re.sub(r"\s+", " ", review.text)
+        assert "cardio session" in flat
+        assert "no strength sets were found" in flat
 
     def test_engine_picker_on_upload_page(self, client):
         r = client.get("/sessions/ai")
