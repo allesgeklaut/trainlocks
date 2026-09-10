@@ -493,13 +493,8 @@ def parse_ocr_layout(lines: list[OcrLine], today: Any) -> dict[str, Any]:
             metric_rows.add(i)
             continue
         if (len(row) <= 2
-                and all(
-                    _METRIC_VALUE_RE.search(c.text)
-                    and not re.search(r"(?:kg|lb|x|×)", c.text, re.IGNORECASE)
-                    for c in row)
-                and any(_METRIC_VALUE_RE.search(c.text) for c in row)
-                and any(re.search(r"[A-Za-z]{3}", c.text) is None
-                        for c in row)):
+                and all(_is_metric_cell(c.text) for c in row)
+                and any(_METRIC_VALUE_RE.search(c.text) for c in row)):
             metric_rows.add(i)
 
     def flush_pending() -> None:
@@ -513,9 +508,18 @@ def parse_ocr_layout(lines: list[OcrLine], today: Any) -> dict[str, Any]:
         if not text:
             continue
         if idx in metric_rows:
+            # Metric blocks are a boundary for workout rows: a pending name
+            # left over from above ("Graz", "Easy run") must not survive the
+            # card region and swallow a stray number below it.
+            flush_pending()
             continue
         # Status-bar / tab-bar bands (full-width UI, never workout data).
         if row[0].y1 < top_band or row[0].y0 > bottom_band:
+            continue
+        # UI noise that passed the band check (nav rows like "Workout
+        # Details >", stray page-dot numbers) — but never a row that
+        # actually parses as set content ("45s" holds, "3 x 8").
+        if _is_noise_row(text) and not _parse_set_text(text):
             continue
 
         # Cardio row?
@@ -748,6 +752,17 @@ def _extract_card_metrics(
             context.append(text)
 
     return metrics, context
+
+
+def _is_metric_cell(text: str) -> bool:
+    """A cell is summary-card data when the whole text reads as exactly one
+    metric value ("560KCAL", "7'53\"/KM", "0:50:38") or is a known metric
+    label. Workout set content — "80kg" weights, "1:30 hold", "12 reps",
+    "45s" countdowns — never qualifies, so those rows stay set rows."""
+    if re.search(r"(?:kg|lb|x|×)", text, re.IGNORECASE):
+        return False
+    return text.lower().strip() in _METRIC_LABELS or bool(
+        _METRIC_VALUE_RE.fullmatch(text))
 
 
 def row_is_metric_only(row: list[OcrLine], metrics: dict[str, str]) -> bool:
