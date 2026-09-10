@@ -35,19 +35,21 @@
            global handler converts into a file selection. -->
       <div id="paste-catcher" contenteditable="true" aria-label="Paste screenshot here"></div>
     </div>
+    <div class="form-group" id="engine-wrap">
+      <label for="engine">Extraction engine</label>
+      <!-- name is required so the choice is actually POSTed with the form. -->
+      <select id="engine" name="engine" onchange="engineChanged()">
+        <option value="auto" selected>Auto (LLM if configured, else built-in OCR)</option>
+        <option value="ocr">Built-in OCR (no setup, works offline)</option>
+        <option value="llm">LLM (requires a configured backend)</option>
+      </select>
+    </div>
     <button type="submit" class="btn btn-primary" id="ai-btn">Extract</button>
     <a href="/sessions" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
     <div id="ai-status" class="ai-status" hidden></div>
   </form>
 
   <div class="ai-picker-row">
-    <div class="select-wrap">
-      <select id="engine" title="Extraction engine" onchange="engineChanged()">
-        <option value="auto" selected>Engine: Auto (LLM if configured, else built-in OCR)</option>
-        <option value="ocr">Engine: Built-in OCR (no setup, works offline)</option>
-        <option value="llm">Engine: LLM (requires a configured backend)</option>
-      </select>
-    </div>
     <div class="select-wrap" id="llm-model-wrap">
       <select id="llm-model" title="Active LLM backend / model" onchange="switchLLMModel()">
         <option value="">loading models…</option>
