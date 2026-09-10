@@ -469,10 +469,18 @@ class TestEngineSelection:
     def test_engine_picker_on_upload_page(self, client):
         r = client.get("/sessions/ai")
         assert r.status_code == 200
-        assert 'id="engine"' in r.text
-        assert 'value="auto"' in r.text
-        assert 'value="ocr"' in r.text
-        assert 'value="llm"' in r.text
+        # The picker must be a named form control INSIDE the upload form —
+        # it used to live outside the form without a name, so the choice
+        # was never POSTed and auto silently overrode it.
+        assert 'name="engine"' in r.text
+        form_html = r.text[r.text.find('action="/sessions/ai/extract"'):]
+        form_end = form_html.find("</form>")
+        form_html = form_html[:form_end]
+        assert 'id="engine"' in form_html
+        assert 'name="engine"' in form_html
+        assert 'value="auto"' in form_html
+        assert 'value="ocr"' in form_html
+        assert 'value="llm"' in form_html
 
 
 # ---------------------------------------------------------------------------

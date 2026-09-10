@@ -331,6 +331,12 @@ hold time in SECONDS here and set reps to null. Convert 1:30 to 90.
 MM:SS, e.g. 0:43:34 -> 43.57). Put extra metrics (pace, heart rate, \
 elevation, calories, cadence, power, location, start time) into the cardio \
 notes so they are preserved.
+- notes: watch/fitness-app summary screenshots (Apple Watch style) are full \
+of structured stats — put a compact summary line into the session notes, \
+e.g. "Outdoor Run — Easy run — Graz — time 0:50:38, avg pace 7'53\"/km, \
+avg HR 139BPM, avg power 202W, 560 kcal". Include workout title, type or \
+location lines when visible. Don't repeat numbers already captured as \
+cardio distance/duration.
 - Drop empty/zero rows; keep the exercise order from the screenshot."""
 
 
