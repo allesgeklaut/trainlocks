@@ -536,6 +536,20 @@ def _review_store_get(token: str) -> dict[str, Any] | None:
         return payload
 
 
+def _review_store_consume(token: str) -> dict[str, Any] | None:
+    """Pop the payload — one save per token (a second submit is stale)."""
+    now = time.monotonic()
+    with _review_store_lock:
+        entry = _review_store.get(token)
+        if entry is None:
+            return None
+        expires, payload = entry
+        del _review_store[token]
+        if expires < now:
+            return None
+        return payload
+
+
 @router.get("/sessions/ai/review", response_class=HTMLResponse)
 async def ai_session_review_page(
     request: Request,
@@ -571,6 +585,7 @@ async def ai_session_review_page(
         "ai_notes": payload["ai_notes"],
         "ai_cardio": payload["ai_cardio"],
         "model_label": payload["model_label"],
+        "review_token": t,
     }
     return render_page(request, "ai_session_review.html", {"user": user, **ctx})
 
@@ -763,8 +778,21 @@ async def ai_session_save(
 ):
     """Save the reviewed AI session: creates the WorkoutSession with sets and
     any checked cardio activities (in one transaction), then redirects to the
-    session list."""
+    session list.
+
+    Requires the review token from the PRG flow — an old review tab whose
+    token is expired/unknown is rejected, so payloads extracted by older
+    (buggy) builds can never be submitted after a redeploy.
+    """
     form = await request.form()
+    token = _form_str(form.get("t"))
+    payload = _review_store_consume(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=409,
+            detail=("This review has expired — upload the screenshot again "
+                    "at /sessions/ai."),
+        )
     date_str = _form_str(form.get("date"))
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")

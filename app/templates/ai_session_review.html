@@ -18,6 +18,9 @@
 {% endif %}
 
 <form method="post" action="/sessions/ai/save" data-suppress-enter hx-boost="false" style="max-width:560px">
+  <!-- PRG token: the save route validates it, so a stale review tab can't
+       submit a payload from an older build after a redeploy. -->
+  <input type="hidden" name="t" value="{{ review_token }}" />
 
   <div class="card">
     <div class="card-title">Session Details</div>
