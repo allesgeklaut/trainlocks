@@ -161,10 +161,21 @@
 
   function engineChanged() {
     const engine = document.getElementById('engine').value;
+    // Remember the choice across visits (per browser, not per user account).
+    try { localStorage.setItem('tl_extraction_engine', engine); } catch (e) {}
     document.getElementById('llm-model-wrap').style.display =
       engine === 'ocr' ? 'none' : '';
   }
-  engineChanged();
+  (function () {
+    // Restore the remembered engine before first paint settles.
+    let saved = null;
+    try { saved = localStorage.getItem('tl_extraction_engine'); } catch (e) {}
+    const sel = document.getElementById('engine');
+    if (saved && sel.querySelector('option[value="' + saved + '"]')) {
+      sel.value = saved;
+    }
+    engineChanged();
+  })();
 
   async function loadLLMModels() {
     const sel = document.getElementById('llm-model');
