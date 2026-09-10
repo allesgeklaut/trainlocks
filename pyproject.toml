@@ -12,8 +12,15 @@ dependencies = [
     "python-dotenv>=1.0",
     "bcrypt>=4.0",
     "itsdangerous>=2.2",
+    "rapidocr>=3.0",
+    "onnxruntime>=1.19",
+    "opencv-python-headless>=4.5",
 ]
 
+# rapidocr hard-depends on opencv-python, whose wheels link libGL (GUI libs
+# the slim runtime image does not ship). opencv-python-headless provides the
+# identical cv2 module without the GUI deps; the Dockerfile removes the GUI
+# build's leftover files so only headless lands in the runtime image.
 [dependency-groups]
 dev = [
     "pytest>=8",
