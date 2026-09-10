@@ -795,8 +795,15 @@ class TestSecurityHeaders:
     def test_html_response_headers(self, client, llm_state):
         r = client.get("/coach")
         assert r.headers.get("x-frame-options") == "DENY"
-        assert r.headers.get("cache-control") == "no-store"
+        assert r.headers.get("cache-control") == "no-store, max-age=0"
         assert r.headers.get("referrer-policy") == "same-origin"
+        # CDN cache-bypass headers: Cloudflare honours these over its
+        # page-rule defaults, so a stale build's HTML is never served.
+        assert r.headers.get("cdn-cache-control") == "no-store"
+        assert r.headers.get("cloudflare-cdn-cache-control") == "no-store"
+        assert r.headers.get("surrogate-control") == "no-store"
+        # Deployment version marker for stale-page diagnosis.
+        assert 'name="app-version"' in r.text
 
     def test_static_files_get_headers_too(self, client, llm_state):
         r = client.get("/static/js/htmx.min.js")
