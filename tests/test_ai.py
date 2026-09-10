@@ -481,9 +481,10 @@ class TestExtraction:
         ex = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
         assert ex is not None
 
-    def test_extract_no_backend_renders_error(self, client, llm_state, monkeypatch):
-        """LLM on but nothing configured: say so instead of a misleading
-        'could not parse JSON' (chat() returns prose in that case)."""
+    def test_extract_no_backend_falls_back_to_ocr(self, client, llm_state, monkeypatch):
+        """LLM on but nothing configured: engine=auto now falls back to the
+        built-in OCR (the fake PNG is undecodable, so the OCR error shows).
+        Forced-LLM without a backend still renders the configure hint."""
         monkeypatch.setattr(llm_mod, "_LLM_BACKENDS_RAW", "")
         monkeypatch.setattr(llm_mod, "_OLLAMA_MODEL", "")
         async def fake_current_backend():
@@ -493,10 +494,12 @@ class TestExtraction:
         png = base64.b64encode(b"\x89PNG fake").decode()
         r = client.post(
             "/sessions/ai/extract",
+            data={"engine": "llm"},
             files={"screenshot": ("shot.png", png.encode(), "image/png")},
         )
         assert r.status_code == 200
         assert "No LLM backend configured" in r.text
+        assert "built-in OCR" in r.text
 
     def test_upload_page_renders(self, client, llm_state):
         r = client.get("/sessions/ai")
@@ -533,9 +536,10 @@ class TestExtractionErrors:
         from app.llm import LLMBackendError
         assert issubclass(LLMBackendError, RuntimeError)
 
-    def test_extract_when_llm_disabled_renders_error_page(self, client, llm_state, monkeypatch):
-        """With LLM_ENABLED=false the upload page explains the toggle is off,
-        instead of surfacing a confusing 502 "try another model"."""
+    def test_extract_when_llm_disabled_ocr_still_works(self, client, llm_state, monkeypatch):
+        """With LLM_ENABLED=false the OCR engine is unaffected — auto mode
+        uses it (the fake PNG is undecodable, so the OCR error shows) and
+        the upload form is still present for a retry."""
         monkeypatch.setattr(llm_mod, "_LLM_ENABLED", False)
         png = base64.b64encode(b"\x89PNG fake").decode()
         r = client.post(
@@ -543,8 +547,8 @@ class TestExtractionErrors:
             files={"screenshot": ("shot.png", png.encode(), "image/png")},
         )
         assert r.status_code == 200
-        assert llm_mod.LLM_DISABLED_MSG in r.text
-        # Upload form is still present so the user can retry once enabled.
+        assert "OCR extraction failed" in r.text
+        # Upload form is still present so the user can retry.
         assert 'action="/sessions/ai/extract"' in r.text
 
 

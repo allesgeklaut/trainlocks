@@ -121,14 +121,19 @@ _COL_GAP_FACTOR = 1.2
 
 _REPS_SET_RE = re.compile(
     r"(\d+)\s*(?:x|×|sets?|reps?)\s*(\d+)|(\d+)\s*(?:x|×)\s*(\d+)", re.IGNORECASE)
-# "10 x 80kg" | "10x80" | "5 × 60 kg"
-WEIGHT_FIRST_RE = re.compile(
-    r"(\d+(?:[.,]\d+)?)\s*(?:kg|kgs|kilos?)?\s*(?:x|×)\s*(\d+)\s*(?:kg|kgs)?"
-    r"(?:\s*(?:@\s*(\d+(?:[.,]\d+)?))?)?", re.IGNORECASE)
-# "80kg x 10" | "80 x 10" | "62.5kg x 9"
-KG_FIRST_RE = re.compile(
-    r"(\d+(?:[.,]\d+)?)\s*(?:kg|kgs|lb|lbs)\s*(?:x|×)\s*(\d+)", re.IGNORECASE)
-LB_HINT_RE = re.compile(r"\b(lb|lbs)\b", re.IGNORECASE)
+# \b doesn't help when "lb" is glued to digits ("135lb") — match unit tokens
+# with an optional word boundary in front and require a boundary after.
+LB_HINT_RE = re.compile(r"(?:\b|(?<=\d))lbs?\b", re.IGNORECASE)
+# "10 x 80kg" (unit after second number)
+REPS_FIRST_UNIT_RE = re.compile(
+    r"(\d+)\s*(?:x|×)\s*(-?\d+(?:[.,]\d+)?)\s*(?:kg|kgs|kilos?|lb|lbs)\b",
+    re.IGNORECASE)
+# "10 x 80" — reps x bare value (sign kept: "8 x -25kg" assisted)
+REPS_FIRST_RE = re.compile(r"(\d+)\s*(?:x|×)\s*(-?\d+(?:[.,]\d+)?)")
+# "80kg x 10" | "135lb x 5" — weight-with-unit first
+UNIT_FIRST_RE = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*(?:kg|kgs|kilos?|lb|lbs)\b\s*(?:x|×)\s*(\d+)",
+    re.IGNORECASE)
 # "3 x 8" plain sets x reps (no weight anywhere)
 PLAIN_SETS_RE = re.compile(r"(\d+)\s*(?:x|×)\s*(\d+)")
 # "1:30" hold duration -> seconds; "45s" / "90 sec"
@@ -209,10 +214,13 @@ def _parse_date(text: str, today: Any) -> str | None:
     m = _DATE_MON_RE.search(text)
     if m:
         mon, day, _d2, mon2 = m.groups()
+        # If the text carries an explicit 4-digit year, honour it.
+        ym = re.search(r"\b(20\d{2})\b", text)
+        year = int(ym.group(1)) if ym else today.year
         month = _MONTHS.get((mon or mon2 or "").lower())
         day_num = int(day or _d2 or 0)
         if month and day_num:
-            got = clamp_past(today.year, month, day_num)
+            got = clamp_past(year, month, day_num)
             if got:
                 return got
     m = _DATE_DOT_RE.search(text)
@@ -244,7 +252,13 @@ def _parse_set_text(text: str) -> list[dict[str, Any]]:
     """
     sets: list[dict[str, Any]] = []
     is_lb = bool(LB_HINT_RE.search(text))
-    chunks = [c.strip() for c in re.split(r"[,;]+", text) if c.strip()]
+    # Split on set separators, but not inside decimal numbers ("62,5kg").
+    # "10, 80" between digits stays one chunk only when it reads as a
+    # decimal (digit,digit with single digits); ", " (comma+space) always
+    # separates. Heuristic: a comma followed by whitespace or a digit-pair
+    # with a space splits; "62,5" (no space) does not.
+    chunks = [c.strip() for c in re.split(r",\s|;\s*|(?<!\d),(?!\d)", text)
+              if c.strip()]
     for chunk in chunks:
         chunk_lb = is_lb or bool(LB_HINT_RE.search(chunk))
         s: dict[str, Any] = {"reps": None, "weight_kg": None,
@@ -255,7 +269,8 @@ def _parse_set_text(text: str) -> list[dict[str, Any]]:
         plain = PLAIN_SETS_RE.search(chunk)
         hold_like = hold is not None and (
             "hold" in chunk.lower()
-            or re.search(r"\b(?:s|sec|secs|seconds)\b", chunk, re.IGNORECASE) is not None
+            or re.search(r"\b(?:sec|secs|seconds)\b", chunk, re.IGNORECASE) is not None
+            or re.search(r"(?<=\d)\s*s\b", chunk, re.IGNORECASE) is not None
             or (hold.group(1) is not None and ":" in chunk
                 and not re.search(r"\d+\s*(?:x|×)\s*\d+", chunk))
         )
@@ -273,8 +288,8 @@ def _parse_set_text(text: str) -> list[dict[str, Any]]:
                 sets.append(s)
             continue
 
-        # KG-first: "80kg x 10"
-        m = KG_FIRST_RE.search(chunk)
+        # Weight-first: "80kg x 10" / "135lb x 5"
+        m = UNIT_FIRST_RE.search(chunk)
         if m:
             weight = _to_float(m.group(1))
             reps = int(m.group(2))
@@ -285,20 +300,41 @@ def _parse_set_text(text: str) -> list[dict[str, Any]]:
             sets.append(s)
             continue
 
-        # Weight-first: "10 x 80kg" (also catches "10 x 80")
-        m = WEIGHT_FIRST_RE.search(chunk)
+        # Reps-first with unit: "10 x 80kg" / "8 x -25kg" (assisted)
+        m = REPS_FIRST_UNIT_RE.search(chunk)
         if m:
-            reps = int(m.group(2))
-            weight = _to_float(m.group(3))
-            if weight is None:
-                # "10 x 80" — second number is weight only if "kg"/"lb" hints
-                # appear somewhere; otherwise it's sets x reps.
-                if chunk_lb or re.search(r"\bkg\b", chunk, re.IGNORECASE):
-                    weight = _to_float(chunk.split("x")[-1].split("×")[-1])
-                else:
-                    weight = None
-            if chunk_lb and weight is not None:
+            reps = int(m.group(1))
+            weight = _to_float(m.group(2))
+            if weight is not None and weight < 0:
+                s["assist_kg"] = abs(weight)
+                weight = None
+            elif chunk_lb and weight is not None:
                 weight = _lb_to_kg(weight)
+            s["reps"], s["weight_kg"] = reps, weight
+            _apply_assist(chunk, s)
+            sets.append(s)
+            continue
+
+        # Reps-first bare: "10 x 80" / "8 x -25kg" — second number is the
+        # per-set load only if the chunk carries a kg/lb hint anywhere;
+        # otherwise it's sets x reps ("3 x 8" = 3 sets of 8).
+        m = REPS_FIRST_RE.search(chunk)
+        if m:
+            weight = _to_float(m.group(2)) if (
+                chunk_lb or re.search(r"\bkg\b", chunk, re.IGNORECASE)) else None
+            if weight is None:
+                # No unit: sets x reps — expand to one entry per set. But a
+                # negative second number is never a set count: "8 x -25kg"
+                # (unit present) is handled below; a bare "8 x -3" is junk.
+                for _ in range(int(m.group(1))):
+                    sets.append({"reps": int(m.group(2)), "weight_kg": None,
+                                 "assist_kg": None, "duration_seconds": None})
+                continue
+            reps = int(m.group(1))
+            if weight < 0:
+                # Negative load on a reps-first row is an assisted load.
+                s["assist_kg"] = abs(weight)
+                weight = None
             s["reps"], s["weight_kg"] = reps, weight
             _apply_assist(chunk, s)
             sets.append(s)
@@ -478,10 +514,12 @@ def _parse_cardio_row(row: list[OcrLine]) -> dict[str, Any] | None:
     m = DURATION_RE.search(text)
     if m:
         if m.group(1) is not None:
-            h = int(m.group(1))
-            mm = int(m.group(2))
-            sec = int(m.group(3) or 0)
-            dur = round(h * 60 + mm + sec / 60, 2)
+            # "1:43:34" = H:MM:SS; bare "43:34" = MM:SS (43.57 min).
+            if m.group(3) is not None:
+                h, mm, sec = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                dur = round(h * 60 + mm + sec / 60, 2)
+            else:
+                dur = round(int(m.group(1)) + int(m.group(2)) / 60, 2)
         else:
             dur = _to_float(m.group(4))
     if dist is None and dur is None:
