@@ -1,10 +1,10 @@
 {% extends layout %}
 {% block title %}AI Session — Training Log{% endblock %}
 {% block content %}
-<div class="page-header">
+  <div class="page-header">
   <button type="button" class="hero-eyebrow page-eyebrow" data-nav-toggle aria-label="Toggle navigation" title="Toggle navigation">~/sessions/ai<span class="caret" aria-hidden="true"></span></button>
   <h1 class="page-title">Log from Screenshot</h1>
-  <p class="page-subtitle">Upload a workout screenshot — the AI fills in the session for you to review</p>
+  <p class="page-subtitle">Upload a workout screenshot — extraction fills in the session for you to review</p>
 </div>
 
 {% if extract_error %}
@@ -35,18 +35,25 @@
            global handler converts into a file selection. -->
       <div id="paste-catcher" contenteditable="true" aria-label="Paste screenshot here"></div>
     </div>
-    <button type="submit" class="btn btn-primary" id="ai-btn">Extract with AI</button>
+    <button type="submit" class="btn btn-primary" id="ai-btn">Extract</button>
     <a href="/sessions" class="btn btn-secondary" style="margin-left:var(--space-3)">Cancel</a>
     <div id="ai-status" class="ai-status" hidden></div>
   </form>
 
   <div class="ai-picker-row">
     <div class="select-wrap">
+      <select id="engine" title="Extraction engine" onchange="engineChanged()">
+        <option value="auto" selected>Engine: Auto (LLM if configured, else built-in OCR)</option>
+        <option value="ocr">Engine: Built-in OCR (no setup, works offline)</option>
+        <option value="llm">Engine: LLM (requires a configured backend)</option>
+      </select>
+    </div>
+    <div class="select-wrap" id="llm-model-wrap">
       <select id="llm-model" title="Active LLM backend / model" onchange="switchLLMModel()">
         <option value="">loading models…</option>
       </select>
     </div>
-    <span class="ai-vision-hint">⚠ Screenshot extraction needs a vision-capable model — e.g. ollama's glm-5.3-flash:cloud or gemma4, or gpt-4o. Text-only models (nemotron, qwen) will fail.</span>
+    <span class="ai-vision-hint">⚠ LLM extraction needs a vision-capable model — e.g. ollama's glm-5.3-flash:cloud or gemma4, or gpt-4o. Text-only models (nemotron, qwen) will fail. Built-in OCR works everywhere but reads plain layouts best.</span>
   </div>
 </div>
 {% endblock %}
@@ -139,11 +146,23 @@
   function aiSubmit(form) {
     const btn = document.getElementById('ai-btn');
     const status = document.getElementById('ai-status');
+    const engine = document.getElementById('engine').value;
     btn.disabled = true;
     status.hidden = false;
-    status.textContent = 'Reading the screenshot with ' + (document.getElementById('llm-model').selectedOptions[0]?.text || 'the AI') + ' — this can take a minute…';
+    if (engine === 'ocr') {
+      status.textContent = 'Reading the screenshot with the built-in OCR engine…';
+    } else {
+      status.textContent = 'Reading the screenshot with ' + (document.getElementById('llm-model').selectedOptions[0]?.text || 'the AI') + ' — this can take a minute…';
+    }
     return true; // normal form POST; server renders the review page
   }
+
+  function engineChanged() {
+    const engine = document.getElementById('engine').value;
+    document.getElementById('llm-model-wrap').style.display =
+      engine === 'ocr' ? 'none' : '';
+  }
+  engineChanged();
 
   async function loadLLMModels() {
     const sel = document.getElementById('llm-model');
