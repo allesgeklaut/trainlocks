@@ -16,10 +16,20 @@ from app.ai import (
     _match_or_create_exercises,
     _norm_name,
     _parse_json_loose,
+    _review_store_put,
 )
 from app.auth import COOKIE_NAME, create_session_cookie
 from app.database import Base, SessionLocal, engine
 from app.main import app
+
+
+def _save_token() -> str:
+    """Fresh PRG token, as the review form would carry (save requires one)."""
+    return _review_store_put({
+        "exercise_ids": [], "is_new_flags": [], "set_lists": [],
+        "created_names": [], "ai_date": "", "ai_notes": "",
+        "ai_cardio": [], "model_label": "test",
+    })
 
 
 def _one(qry):
@@ -560,6 +570,7 @@ class TestAiSessionSave:
         db.add(ex)
         db.commit()
         r = client.post("/sessions/ai/save", data={
+            "t": _save_token(),
             "date": "2026-09-02",
             "notes": "AI saved session",
             f"reps-{ex.id}-1": "10", f"weight-{ex.id}-1": "50",
@@ -590,6 +601,7 @@ class TestAiSessionSave:
     def test_save_session_cardio_only(self, client, llm_state):
         """A cardio-only screenshot saves fine with no sets."""
         r = client.post("/sessions/ai/save", data={
+            "t": _save_token(),
             "date": "2026-09-03",
             "notes": "",
             "cardio-0-include": "1",
@@ -610,6 +622,7 @@ class TestAiSessionSave:
         entry #1 (unchecked checkboxes aren't submitted; the loop must key
         off the always-submitted -type select)."""
         r = client.post("/sessions/ai/save", data={
+            "t": _save_token(),
             "date": "2026-09-05",
             "notes": "",
             # entry 0 UNCHECKED (checkbox absent, as real browsers submit;

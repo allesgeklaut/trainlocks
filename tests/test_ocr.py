@@ -459,6 +459,7 @@ class TestEngineSelection:
         db = SessionLocal()
         ex = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
         r = client.post("/sessions/ai/save", data={
+            "t": token,
             "date": "2026-09-08", "notes": "ocr session",
             f"reps-{ex.id}-1": "10", f"weight-{ex.id}-1": "60",
         }, follow_redirects=False)
@@ -466,6 +467,13 @@ class TestEngineSelection:
         sess = _one(db.query(models.WorkoutSession).filter_by(
             notes="ocr session"))
         assert sess.sets[0].weight == 60.0
+
+        # The token is consumed — a second submit (stale tab) is rejected.
+        r2 = client.post("/sessions/ai/save", data={
+            "t": token,
+            "date": "2026-09-08", "notes": "double save",
+        }, follow_redirects=False)
+        assert r2.status_code == 409
 
     def test_cardio_only_review_says_cardio_session(self, client, monkeypatch):
         """A cardio-only OCR extract states it will be saved as a cardio
@@ -504,6 +512,30 @@ class TestEngineSelection:
         assert 'value="auto"' in form_html
         assert 'value="ocr"' in form_html
         assert 'value="llm"' in form_html
+
+    def test_save_requires_review_token(self, client):
+        """The save route validates the PRG token — a stale review tab from
+        an older build can never submit its payload after a redeploy."""
+        r = client.post("/sessions/ai/save", data={
+            "t": "bogus-token", "date": "2026-09-08", "notes": "stale",
+        }, follow_redirects=False)
+        assert r.status_code == 409
+        assert "expired" in r.json()["detail"]
+
+    def test_review_form_carries_token(self, client, monkeypatch):
+        async def fake_extract(raw, today):
+            return {"date": None, "exercises": [],
+                    "cardio": [{"activity_type": "running",
+                                "distance_km": 5.0, "duration_min": 30.0,
+                                "notes": None}],
+                    "notes": None}
+
+        import app.ai as ai_mod
+        monkeypatch.setattr(ai_mod, "_ocr_extract", fake_extract)
+        r = self._post(client, "ocr")
+        token = r.headers["location"].split("t=", 1)[1]
+        review = client.get(f"/sessions/ai/review?t={token}")
+        assert f'name="t" value="{token}"' in review.text
 
 
 # ---------------------------------------------------------------------------
