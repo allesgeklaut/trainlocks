@@ -169,6 +169,60 @@ KM_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:km|kilometers?|kilometres?)\b",
 DURATION_RE = re.compile(r"(?:(\d{1,2}):(\d{2})(?::(\d{2}))?|(\d+(?:[.,]\d+)?)\s*(?:min|mins|minutes)\b)",
                          re.IGNORECASE)
 
+# ── Screenshot summary-card extraction (Apple Watch / fitness-app cards) ─────
+#
+# These screenshots are a grid of label/value pairs, usually two columns
+# ("Workout Time | Distance" / "0:50:38 | 6,42KM"), sometimes one label per
+# row. Labels sit either in the same visual row as their value or in the row
+# directly above. Anything not matching a metric label is context (title,
+# subtitle, location, time-of-day range) and goes into the notes.
+
+# Label (lowercased, stripped) -> internal metric key. Unmatched labels are
+# ignored so stray UI text ("Workout Details >", tab bars) is never captured.
+_METRIC_LABELS: dict[str, str] = {
+    "workout time": "time", "duration": "time", "active time": "time",
+    "distance": "distance", "total distance": "distance",
+    "avg pace": "pace", "average pace": "pace", "pace": "pace",
+    "avg heart rate": "hr", "average heart rate": "hr",
+    "heart rate": "hr", "avg hr": "hr",
+    "avg power": "power", "average power": "power",
+    "avg cadence": "cadence", "average cadence": "cadence",
+    "active kilocalories": "active_kcal", "active calories": "active_kcal",
+    "total kilocalories": "total_kcal", "total calories": "total_kcal",
+    "calories": "total_kcal", "energy": "total_kcal",
+    "elevation gain": "elevation", "elevation asc": "elevation",
+    "elevation": "elevation",
+    "avg speed": "speed", "average speed": "speed",
+    "avg stride length": "stride",
+}
+# A value cell: number+unit, bare time, or pace ("7'53"/KM", "5:12 /km").
+_METRIC_VALUE_RE = re.compile(
+    r"\d+(?:[.,]\d+)?\s*(?:km|kcal|cal|w(?:att)?s?|spm|bpm|km/h|min/km|m/km"
+    r"|mi|ft|mm|kg|l|ml|floz|oz)\b"
+    r"|\d+'\d+\"?\s*/\s*km"
+    r"|\d+(?:[.,]\d+)?\s*/\s*km"
+    r"|\d{1,2}:\d{2}(?::\d{2})?"
+    r"|\d+(?:[.,]\d+)?%?",
+    re.IGNORECASE)
+# Time-of-day window the workout happened in ("06:52-07:43").
+_TIME_OF_DAY_RE = re.compile(r"\b\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2}\b")
+# UI noise never kept as context/notes: status bar, tab bar, nav rows, page
+# dots, battery percent, clock-only rows.
+_STATUS_NOISE_RE = re.compile(
+    r"^(?:wlan|wifi|lte|5g|4g|call|battery|\d+\s*%)\b|"
+    r"^\d{1,2}:\d{2}$|^\d+\s*%?$|^[+·•]+$|"
+    r"^(?:summary|fitness\+?|workout(?:\s+details\s*>?)?|sharing|done|done\.)$",
+    re.IGNORECASE)
+# Human order for the notes line.
+_METRIC_ORDER = ("time", "distance", "pace", "hr", "power", "cadence",
+                 "speed", "active_kcal", "total_kcal", "elevation", "stride")
+_METRIC_NOTES_LABEL = {
+    "time": "time", "distance": "distance", "pace": "avg pace", "hr": "avg HR",
+    "power": "avg power", "cadence": "avg cadence", "speed": "avg speed",
+    "active_kcal": "active kcal", "total_kcal": "total kcal",
+    "elevation": "elevation", "stride": "avg stride",
+}
+
 
 def _to_float(token: str | None) -> float | None:
     if token is None:
@@ -405,6 +459,11 @@ def parse_ocr_layout(lines: list[OcrLine], today: Any) -> dict[str, Any]:
 
     med_h = sorted(l.height for l in lines)[len(lines) // 2] if lines else 20.0
     col_gap = med_h * _COL_GAP_FACTOR
+    # Phone screenshots carry a status bar (carrier/clock/battery) at the top
+    # and a tab bar at the bottom — drop both bands entirely.
+    max_y = max(l.y1 for l in lines)
+    top_band = max_y * 0.05
+    bottom_band = max_y * 0.95
 
     # Group lines into visual rows by vertical overlap of y-ranges.
     rows: list[list[OcrLine]] = []
@@ -419,15 +478,44 @@ def parse_ocr_layout(lines: list[OcrLine], today: Any) -> dict[str, Any]:
     exercises: list[dict[str, Any]] = []
     pending_name: str | None = None
 
+    # Summary-card metrics (Apple-Watch-style label/value grids) become the
+    # session notes; their rows must not leak in as exercise names. A row is
+    # a metric row when it carries a known metric label; bare value rows
+    # only count when they carry a unit (kg/... — not hold times or dates,
+    # which belong to the workout rows).
+    metrics, context = _extract_card_metrics(rows)
+    metric_rows: set[int] = set()
+    for i, row in enumerate(rows):
+        text = " ".join(l.text for l in row).strip()
+        if not text or _is_noise_row(text) or _looks_cardio(text):
+            continue
+        if any(c.text.lower().strip() in _METRIC_LABELS for c in row):
+            metric_rows.add(i)
+            continue
+        if (len(row) <= 2
+                and all(
+                    _METRIC_VALUE_RE.search(c.text)
+                    and not re.search(r"(?:kg|lb|x|×)", c.text, re.IGNORECASE)
+                    for c in row)
+                and any(_METRIC_VALUE_RE.search(c.text) for c in row)
+                and any(re.search(r"[A-Za-z]{3}", c.text) is None
+                        for c in row)):
+            metric_rows.add(i)
+
     def flush_pending() -> None:
         nonlocal pending_name
         if pending_name is not None:
             exercises.append({"name": pending_name, "sets": []})
             pending_name = None
 
-    for row in rows:
+    for idx, row in enumerate(rows):
         text = " ".join(l.text for l in row).strip()
         if not text:
+            continue
+        if idx in metric_rows:
+            continue
+        # Status-bar / tab-bar bands (full-width UI, never workout data).
+        if row[0].y1 < top_band or row[0].y0 > bottom_band:
             continue
 
         # Cardio row?
@@ -479,6 +567,43 @@ def parse_ocr_layout(lines: list[OcrLine], today: Any) -> dict[str, Any]:
                      or s.get("assist_kg") is not None
                      or s.get("duration_seconds") is not None]
     out["exercises"] = [e for e in exercises if e["sets"]]
+
+    # Notes: summary-card context (title/subtitle/location/time) + metrics.
+    title = next((t for t in context
+                  if _cardio_type(t) != "other"
+                  or re.search(r"(?i)\b(run|ride|swim|walk|row|hike|session)\b", t)),
+                 None)
+    out["notes"] = format_metric_notes(
+        metrics, [t for t in context if t != title], title=title) or None
+
+    # Summary-card screenshots with a cardio title ("Outdoor Run") and no
+    # strength rows are a cardio session — synthesize the cardio entry from
+    # the captured metrics so the review form shows the cardio flow.
+    if metrics and not out["exercises"] and not out["cardio"] and title:
+        atype = _cardio_type(title)
+        if atype != "other":
+            time_v = metrics.get("time")
+            dist_v = metrics.get("distance")
+            dur = None
+            dist = None
+            if time_v:
+                tm = DURATION_RE.search(time_v)
+                if tm:
+                    if tm.group(3) is not None:
+                        dur = round(int(tm.group(1)) * 60 + int(tm.group(2))
+                                    + int(tm.group(3)) / 60, 2)
+                    else:
+                        dur = round(int(tm.group(1)) + int(tm.group(2)) / 60, 2)
+            if dist_v:
+                km = KM_RE.search(dist_v)
+                if km:
+                    dist = _to_float(km.group(1))
+            if dist is not None or dur is not None:
+                out["cardio"].append({
+                    "activity_type": atype, "distance_km": dist,
+                    "duration_min": dur,
+                    "notes": " ".join(t for t in context if t != title) or None,
+                })
     return out
 
 
@@ -490,7 +615,10 @@ def _overlaps(a: OcrLine, b: OcrLine) -> bool:
 
 def _is_values_only(text: str) -> bool:
     stripped = re.sub(r"[\d.,:x×kgsecore@+\-\s/]+", "", text, flags=re.IGNORECASE)
-    return len(stripped) <= 2
+    # "Graz"-like words made only of charset letters count as values only
+    # when the original also carries a digit/separator.
+    return len(stripped) <= 2 and bool(
+        re.search(r"[\d.,:x×@+\-/]", text))
 
 
 def _has_unit_or_sep(text: str) -> bool:
@@ -526,3 +654,129 @@ def _parse_cardio_row(row: list[OcrLine]) -> dict[str, Any] | None:
         return None
     return {"activity_type": atype, "distance_km": dist,
             "duration_min": dur, "notes": text if atype == "other" else None}
+
+
+# ---------------------------------------------------------------------------
+# Summary-card extraction: label/value grid + context -> notes enrichment
+# ---------------------------------------------------------------------------
+
+def _is_noise_row(text: str) -> bool:
+    """Status bar / tab bar / page dots / nav rows — never context.
+    Time-of-day ranges ("06:52-07:43") are context, not noise."""
+    if _TIME_OF_DAY_RE.search(text):
+        return False
+    return bool(_STATUS_NOISE_RE.search(text)) or not re.search(
+        r"[A-Za-z]{2,}", text)
+
+
+def _extract_card_metrics(
+        rows: list[list[OcrLine]]) -> tuple[dict[str, str], list[str]]:
+    """Pull structured metric values + context lines from a workout-summary
+    screenshot (Apple Watch card style).
+
+    Labels sit either in the same visual row as their value (two-column
+    grids) or in the row directly above (single-column lists). Returns
+    (metric_key -> raw value text, context lines kept for the notes).
+    """
+    metrics: dict[str, str] = {}
+    context: list[str] = []
+    max_y = max((l.y1 for row in rows for l in row), default=0.0)
+
+    def capture(label: str, key: str, value: str | None) -> None:
+        if value and _METRIC_VALUE_RE.search(value) and key not in metrics:
+            metrics[key] = value.strip()
+
+    def is_noise_cell(text: str) -> bool:
+        return _is_noise_row(text.strip())
+
+    def is_noise_row_row(row: list[OcrLine]) -> bool:
+        """A visual row is noise when every cell individually is noise —
+        catches grouped tab bars ("Summary | Fitness+ | Workout | Sharing")."""
+        return bool(row) and all(is_noise_cell(c.text) for c in row)
+
+    for i, row in enumerate(rows):
+        text = " ".join(l.text for l in row).strip()
+        if not text or is_noise_row_row(row):
+            continue
+        if _looks_cardio(text) or _parse_set_text(text):
+            # Real workout rows are handled by the layout parser — but
+            # cardio-like titles without any numbers ("Outdoor Run",
+            # "Easy run") carry no data, so keep them as context instead
+            # of silently dropping them.
+            if _looks_cardio(text) and not _parse_set_text(text) \
+                    and not KM_RE.search(text) and not DURATION_RE.search(text):
+                context.append(text)
+            continue
+        # Status-bar / tab-bar bands: skip from context as well.
+        if row[0].y1 < max_y * 0.05 or row[0].y0 > max_y * 0.95:
+            continue
+        row_is_label = any(
+            c.text.lower().strip() in _METRIC_LABELS for c in row)
+        next_row = rows[i + 1] if i + 1 < len(rows) else []
+        for j, cell in enumerate(row):
+            key = _METRIC_LABELS.get(cell.text.lower().strip())
+            if key is None:
+                continue
+            value: str | None = None
+            # Value in the same row, to the right of the label.
+            if j + 1 < len(row) and _METRIC_VALUE_RE.search(row[j + 1].text):
+                value = row[j + 1].text
+            # ...or in the row directly below, same column (aligned grids).
+            elif (len(next_row) == len(row)
+                  and _METRIC_VALUE_RE.search(next_row[j].text)):
+                value = next_row[j].text
+            elif (len(next_row) == 1
+                  and _METRIC_VALUE_RE.search(next_row[0].text)
+                  and len(row) == 1):
+                value = next_row[0].text
+            capture(cell.text, key, value)
+        # Value-only rows whose label row was above are captured by the
+        # label loop; anything else with words is context.
+        if not row_is_metric_only(row, metrics):
+            low = text.lower()
+            if (not _TIME_OF_DAY_RE.search(text)
+                    and not any(c.text.lower().strip() in _METRIC_LABELS
+                                for c in row)
+                    and not _is_values_only(text)):
+                context.append(text)
+
+    # Time-of-day rows ("06:52-07:43") — keep verbatim, they read naturally.
+    for row in rows:
+        text = " ".join(l.text for l in row).strip()
+        if text and not is_noise_row_row(row) and _TIME_OF_DAY_RE.search(text) \
+                and text not in context:
+            context.append(text)
+
+    return metrics, context
+
+
+def row_is_metric_only(row: list[OcrLine], metrics: dict[str, str]) -> bool:
+    """True when every cell in the row is either a known label or a value
+    that looks like a metric (so it shouldn't repeat as context)."""
+    for cell in row:
+        low = cell.text.lower().strip()
+        if low in _METRIC_LABELS or _METRIC_VALUE_RE.search(cell.text):
+            continue
+        if re.search(r"[A-Za-z]{2,}", cell.text):
+            return False
+    return True
+
+
+def format_metric_notes(metrics: dict[str, str], context: list[str],
+                        title: str | None = None) -> str:
+    """Compose the notes text: context first, then metrics in fixed order."""
+    bits: list[str] = []
+    if title:
+        bits.append(title)
+    bits.extend(context)
+    metric_bits = []
+    for key in _METRIC_ORDER:
+        if key in metrics:
+            metric_bits.append(
+                f"{_METRIC_NOTES_LABEL[key]} {metrics[key]}")
+    for key, val in metrics.items():
+        if key not in _METRIC_ORDER:
+            metric_bits.append(f"{key} {val}")
+    if metric_bits:
+        bits.append(", ".join(metric_bits))
+    return " — ".join(b for b in bits if b) or ""
