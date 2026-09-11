@@ -178,13 +178,13 @@ def test_edit_form_pre_populates_reps_and_weight(client):
 
     # Verify that the input values are pre-populated in the HTML.
     assert f'name="reps-{ex_id}-1"' in html
-    assert f'value="10"' in html
+    assert 'value="10"' in html
     assert f'name="weight-{ex_id}-1"' in html
-    assert f'value="100' in html  # float as 100.0 or 100
+    assert 'value="100' in html  # float as 100.0 or 100
     assert f'name="reps-{ex_id}-2"' in html
-    assert f'value="8"' in html
+    assert 'value="8"' in html
     assert f'name="weight-{ex_id}-2"' in html
-    assert f'value="105' in html
+    assert 'value="105' in html
 
 
 def test_edit_session_upserts_does_not_wipe_unrelated_rows(client):

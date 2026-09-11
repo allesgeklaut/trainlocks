@@ -16,10 +16,20 @@ from app.ai import (
     _match_or_create_exercises,
     _norm_name,
     _parse_json_loose,
+    _review_store_put,
 )
 from app.auth import COOKIE_NAME, create_session_cookie
 from app.database import Base, SessionLocal, engine
 from app.main import app
+
+
+def _save_token() -> str:
+    """Fresh PRG token, as the review form would carry (save requires one)."""
+    return _review_store_put({
+        "exercise_ids": [], "is_new_flags": [], "set_lists": [],
+        "created_names": [], "ai_date": "", "ai_notes": "",
+        "ai_cardio": [], "model_label": "test",
+    })
 
 
 def _one(qry):
@@ -481,9 +491,10 @@ class TestExtraction:
         ex = _one(db.query(models.Exercise).filter_by(name="Bench Press"))
         assert ex is not None
 
-    def test_extract_no_backend_renders_error(self, client, llm_state, monkeypatch):
-        """LLM on but nothing configured: say so instead of a misleading
-        'could not parse JSON' (chat() returns prose in that case)."""
+    def test_extract_no_backend_falls_back_to_ocr(self, client, llm_state, monkeypatch):
+        """LLM on but nothing configured: engine=auto now falls back to the
+        built-in OCR (the fake PNG is undecodable, so the OCR error shows).
+        Forced-LLM without a backend still renders the configure hint."""
         monkeypatch.setattr(llm_mod, "_LLM_BACKENDS_RAW", "")
         monkeypatch.setattr(llm_mod, "_OLLAMA_MODEL", "")
         async def fake_current_backend():
@@ -493,10 +504,12 @@ class TestExtraction:
         png = base64.b64encode(b"\x89PNG fake").decode()
         r = client.post(
             "/sessions/ai/extract",
+            data={"engine": "llm"},
             files={"screenshot": ("shot.png", png.encode(), "image/png")},
         )
         assert r.status_code == 200
         assert "No LLM backend configured" in r.text
+        assert "built-in OCR" in r.text
 
     def test_upload_page_renders(self, client, llm_state):
         r = client.get("/sessions/ai")
@@ -533,9 +546,10 @@ class TestExtractionErrors:
         from app.llm import LLMBackendError
         assert issubclass(LLMBackendError, RuntimeError)
 
-    def test_extract_when_llm_disabled_renders_error_page(self, client, llm_state, monkeypatch):
-        """With LLM_ENABLED=false the upload page explains the toggle is off,
-        instead of surfacing a confusing 502 "try another model"."""
+    def test_extract_when_llm_disabled_ocr_still_works(self, client, llm_state, monkeypatch):
+        """With LLM_ENABLED=false the OCR engine is unaffected — auto mode
+        uses it (the fake PNG is undecodable, so the OCR error shows) and
+        the upload form is still present for a retry."""
         monkeypatch.setattr(llm_mod, "_LLM_ENABLED", False)
         png = base64.b64encode(b"\x89PNG fake").decode()
         r = client.post(
@@ -543,8 +557,8 @@ class TestExtractionErrors:
             files={"screenshot": ("shot.png", png.encode(), "image/png")},
         )
         assert r.status_code == 200
-        assert llm_mod.LLM_DISABLED_MSG in r.text
-        # Upload form is still present so the user can retry once enabled.
+        assert "OCR extraction failed" in r.text
+        # Upload form is still present so the user can retry.
         assert 'action="/sessions/ai/extract"' in r.text
 
 
@@ -556,6 +570,7 @@ class TestAiSessionSave:
         db.add(ex)
         db.commit()
         r = client.post("/sessions/ai/save", data={
+            "t": _save_token(),
             "date": "2026-09-02",
             "notes": "AI saved session",
             f"reps-{ex.id}-1": "10", f"weight-{ex.id}-1": "50",
@@ -586,6 +601,7 @@ class TestAiSessionSave:
     def test_save_session_cardio_only(self, client, llm_state):
         """A cardio-only screenshot saves fine with no sets."""
         r = client.post("/sessions/ai/save", data={
+            "t": _save_token(),
             "date": "2026-09-03",
             "notes": "",
             "cardio-0-include": "1",
@@ -606,6 +622,7 @@ class TestAiSessionSave:
         entry #1 (unchecked checkboxes aren't submitted; the loop must key
         off the always-submitted -type select)."""
         r = client.post("/sessions/ai/save", data={
+            "t": _save_token(),
             "date": "2026-09-05",
             "notes": "",
             # entry 0 UNCHECKED (checkbox absent, as real browsers submit;
@@ -726,7 +743,6 @@ class TestExtractionPRG:
         assert r.status_code == 303
         location = r.headers["location"]
         assert location.startswith("/sessions/ai/review?t=")
-        token = location.split("t=", 1)[1]
 
         # The GET renders the form WITHOUT calling the LLM again.
         r2 = client.get(location)
@@ -746,7 +762,6 @@ class TestExtractionPRG:
         assert 'action="/sessions/ai/extract"' in r.text  # upload form back
 
     def test_review_token_expires_after_ttl(self, client, llm_state, monkeypatch):
-        import time as _time
         from app import ai as ai_mod
         llm_json = json.dumps({"date": None, "exercises": [],
                                "cardio": [], "notes": None})
@@ -766,7 +781,6 @@ class TestExtractionPRG:
         assert client.get(r.headers["location"]).status_code == 200
 
         # Age the entry past the TTL.
-        expired = _time.monotonic() - 1
         with ai_mod._review_store_lock:
             exp, payload = ai_mod._review_store[token]
             ai_mod._review_store[token] = (exp - ai_mod._REVIEW_TTL_SECONDS - 1, payload)

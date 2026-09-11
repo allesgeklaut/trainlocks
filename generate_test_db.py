@@ -7,7 +7,6 @@ that match the expectations of the existing tests.
 
 import os
 import sys
-import tempfile
 from datetime import date, timedelta
 
 # Add the app directory to Python path so we can import models
