@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import difflib
+import inspect
 import json
 import logging
 import re
@@ -361,8 +362,8 @@ def _parse_json_loose(text: str) -> Any:
 async def _llm_extract(b64_image: str) -> dict[str, Any]:
     """Vision-call the LLM and return the parsed workout JSON.
 
-    Raises LLMBackendError / ValueError with user-appropriate messages on
-    failure; the caller renders them on the upload page.
+    Raises ValueError with a user-appropriate message on failure; the caller
+    renders it on the upload page.
     """
     try:
         reply = await llm_mod.chat([
@@ -485,10 +486,10 @@ def _ocr_extract(raw: bytes, today: date) -> dict[str, Any]:
 
 async def _run_ocr_extract(raw: bytes, today: date) -> dict[str, Any]:
     """Await OCR extraction, thread-offloading the sync implementation."""
-    result = _ocr_extract(raw, today)
-    if asyncio.iscoroutine(result):
-        return await result
-    return await asyncio.to_thread(lambda: result)
+    extract: Any = _ocr_extract  # tests monkeypatch this with an async fake
+    if inspect.iscoroutinefunction(extract):
+        return await extract(raw, today)
+    return await asyncio.to_thread(_ocr_extract, raw, today)
 
 
 @router.get("/sessions/ai", response_class=HTMLResponse)
@@ -786,13 +787,8 @@ async def ai_session_save(
     """
     form = await request.form()
     token = _form_str(form.get("t"))
-    payload = _review_store_consume(token)
-    if payload is None:
-        raise HTTPException(
-            status_code=409,
-            detail=("This review has expired — upload the screenshot again "
-                    "at /sessions/ai."),
-        )
+    # Validate the date before consuming the token: a 400 here must not eat
+    # the PRG entry, or a fixable form error would force a full re-extraction.
     date_str = _form_str(form.get("date"))
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
@@ -800,6 +796,13 @@ async def ai_session_save(
         workout_date = date.fromisoformat(str(date_str))
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date")
+    payload = _review_store_consume(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=409,
+            detail=("This review has expired — upload the screenshot again "
+                    "at /sessions/ai."),
+        )
 
     workout = models.WorkoutSession(
         date=workout_date,
