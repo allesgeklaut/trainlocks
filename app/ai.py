@@ -5,8 +5,10 @@ Route handlers only; the LLM plumbing lives in :mod:`app.llm`.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import difflib
+import inspect
 import json
 import logging
 import re
@@ -16,13 +18,14 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.orm import Session
 
 from . import llm as llm_mod
 from . import models
+from . import ocr as ocr_mod
 from .auth import get_current_user, get_db
 from .load import (
     effective_load_kg,
@@ -329,6 +332,12 @@ hold time in SECONDS here and set reps to null. Convert 1:30 to 90.
 MM:SS, e.g. 0:43:34 -> 43.57). Put extra metrics (pace, heart rate, \
 elevation, calories, cadence, power, location, start time) into the cardio \
 notes so they are preserved.
+- notes: watch/fitness-app summary screenshots (Apple Watch style) are full \
+of structured stats — put a compact summary line into the session notes, \
+e.g. "Outdoor Run — Easy run — Graz — time 0:50:38, avg pace 7'53\"/km, \
+avg HR 139BPM, avg power 202W, 560 kcal". Include workout title, type or \
+location lines when visible. Don't repeat numbers already captured as \
+cardio distance/duration.
 - Drop empty/zero rows; keep the exercise order from the screenshot."""
 
 
@@ -348,6 +357,48 @@ def _parse_json_loose(text: str) -> Any:
         if brace:
             return json.loads(brace.group(0))
         raise
+
+
+async def _llm_extract(b64_image: str) -> dict[str, Any]:
+    """Vision-call the LLM and return the parsed workout JSON.
+
+    Raises ValueError with a user-appropriate message on failure; the caller
+    renders it on the upload page.
+    """
+    try:
+        reply = await llm_mod.chat([
+            {"role": "system", "content": _extraction_system_prompt()},
+            {"role": "user",
+             "content": "Extract the workout session from this screenshot as JSON.",
+             "images": [b64_image]},
+        ])
+    except llm_mod.LLMBackendError as e:
+        # Most common cause: the active model doesn't accept images (HTTP 400
+        # from the backend).
+        msg = str(e)
+        hint = ("This model may not support images. Pick a vision-capable "
+                "model (e.g. glm-5.3-flash:cloud, gemma4, gpt-4o) from the "
+                "dropdown, or switch the engine to the built-in OCR.")
+        logger.warning("Screenshot extraction failed: %s", msg)
+        raise ValueError(f"{msg} — {hint}") from e
+    text = (reply.get("text") or "").strip()
+    if not text:
+        raise ValueError("The AI returned an empty response — try again or "
+                         "pick another model.")
+    try:
+        data = _parse_json_loose(text)
+    except (json.JSONDecodeError, ValueError, RecursionError) as e:
+        raise ValueError("Could not parse the AI response as JSON — try "
+                         "another model or the built-in OCR engine.") from e
+    # The reply comes from an LLM — the shape is untrusted. Anything but a
+    # JSON object fails here rather than crashing the route with a 500.
+    if not isinstance(data, dict):
+        raise ValueError("The AI response was not a JSON object — try "
+                         "another model or the built-in OCR engine.")
+    data.setdefault("exercises", [])
+    data.setdefault("cardio", [])
+    data.setdefault("notes", None)
+    return data
 
 
 def _coerce_float(v: Any) -> float | None:
@@ -405,6 +456,42 @@ def _match_or_create_exercises(
     return mapping, created
 
 
+# ── Engine selection for the extraction flow ─────────────────────────────────
+#
+# "auto" prefers the LLM when one is configured (better on messy/handwritten
+# screenshots) and falls back to the baked-in OCR otherwise. "llm"/"ocr" force
+# one engine; choosing "llm" without a backend renders a friendly error.
+_ENGINE_CHOICES = ("auto", "llm", "ocr")
+
+
+def _ocr_payload_from_lines(lines: list, today: date) -> dict[str, Any]:
+    """Wrap ocr.parse_ocr_layout so the route keeps one payload shape."""
+    data = ocr_mod.parse_ocr_layout(lines, today)
+    data.setdefault("exercises", [])
+    data.setdefault("cardio", [])
+    data.setdefault("notes", None)
+    return data
+
+
+def _ocr_extract(raw: bytes, today: date) -> dict[str, Any]:
+    """Run the OCR engine + layout parser; raises OCRError on failure.
+
+    Runs in a worker thread from the route (the engine holds a GIL-heavy
+    onnxruntime session); tests monkeypatch this with an async fake, so
+    :func:`_run_ocr_extract` awaits whichever shape it finds.
+    """
+    lines = ocr_mod.ocr_image(raw)
+    return _ocr_payload_from_lines(lines, today)
+
+
+async def _run_ocr_extract(raw: bytes, today: date) -> dict[str, Any]:
+    """Await OCR extraction, thread-offloading the sync implementation."""
+    extract: Any = _ocr_extract  # tests monkeypatch this with an async fake
+    if inspect.iscoroutinefunction(extract):
+        return await extract(raw, today)
+    return await asyncio.to_thread(_ocr_extract, raw, today)
+
+
 @router.get("/sessions/ai", response_class=HTMLResponse)
 async def ai_session_page(
     request: Request,
@@ -450,6 +537,20 @@ def _review_store_get(token: str) -> dict[str, Any] | None:
         return payload
 
 
+def _review_store_consume(token: str) -> dict[str, Any] | None:
+    """Pop the payload — one save per token (a second submit is stale)."""
+    now = time.monotonic()
+    with _review_store_lock:
+        entry = _review_store.get(token)
+        if entry is None:
+            return None
+        expires, payload = entry
+        del _review_store[token]
+        if expires < now:
+            return None
+        return payload
+
+
 @router.get("/sessions/ai/review", response_class=HTMLResponse)
 async def ai_session_review_page(
     request: Request,
@@ -485,6 +586,7 @@ async def ai_session_review_page(
         "ai_notes": payload["ai_notes"],
         "ai_cardio": payload["ai_cardio"],
         "model_label": payload["model_label"],
+        "review_token": t,
     }
     return render_page(request, "ai_session_review.html", {"user": user, **ctx})
 
@@ -493,13 +595,17 @@ async def ai_session_review_page(
 async def ai_session_extract(
     request: Request,
     screenshot: UploadFile = File(...),
+    engine: str = Form("auto"),
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Run vision extraction on an uploaded screenshot and render a review form.
+    """Run extraction on an uploaded screenshot and render a review form.
 
-    The review form posts to the regular ``POST /sessions/new`` flow, so
-    confirming/editing reuses the existing session-creation code path.
+    ``engine`` selects the extraction engine: ``auto`` (LLM when a backend is
+    configured, else the baked-in OCR), ``llm`` (force LLM) or ``ocr`` (force
+    the no-setup OCR). The review form posts to the regular
+    ``POST /sessions/new`` flow, so confirming/editing reuses the existing
+    session-creation code path.
     """
     # Size guard BEFORE reading the body into memory: a multi-GB upload
     # would otherwise be fully buffered just to be rejected.
@@ -512,71 +618,50 @@ async def ai_session_extract(
         raise HTTPException(status_code=400, detail="empty file")
     if len(raw) > max_bytes:
         raise HTTPException(status_code=400, detail="file too large (max 10 MB)")
-    b64 = base64.b64encode(raw).decode("ascii")
 
-    if not llm_mod.llm_enabled():
-        # Feature is switched off — say so instead of letting the disabled
-        # message fail JSON parsing further down (502 "try another model").
+    engine_name = engine.strip().lower()
+    if engine_name not in _ENGINE_CHOICES:
+        engine_name = "auto"
+    llm_ok = llm_mod.llm_enabled() and bool(await llm_mod.current_backend())
+
+    # NOTE: extraction errors render the upload page with a message (HTTP 200,
+    # not 5xx) — Cloudflare would otherwise replace a 5xx with its own "Bad
+    # Gateway" page and hide the helpful hint.
+    use_ocr = engine_name == "ocr" or (engine_name == "auto" and not llm_ok)
+    if engine_name == "llm" and not llm_ok:
         return render_page(request, "ai_session.html", {
             "user": user,
-            "extract_error": llm_mod.LLM_DISABLED_MSG,
+            "extract_error": ("No LLM backend configured — add one via "
+                              "LLM_BACKENDS, or pick the built-in OCR engine."),
         })
 
-    if not await llm_mod.current_backend():
-        # Switch is on but nothing is configured: chat() would return prose
-        # that then fails JSON parsing with a misleading "try another model".
-        return render_page(request, "ai_session.html", {
-            "user": user,
-            "extract_error": "No LLM backend configured — add one via LLM_BACKENDS.",
-        })
-
-    try:
-        reply = await llm_mod.chat([
-            {"role": "system", "content": _extraction_system_prompt()},
-            {"role": "user",
-             "content": "Extract the workout session from this screenshot as JSON.",
-             "images": [b64]},
-        ])
-    except llm_mod.LLMBackendError as e:
-        # Most common cause: the active model doesn't accept images (HTTP 400
-        # from the backend). Render the upload page with the error instead of
-        # an unhandled 500.
-        msg = str(e)
-        hint = ("This model may not support images. Pick a vision-capable "
-                "model (e.g. glm-5.3-flash:cloud, gemma4, gpt-4o) from the "
-                "dropdown and try again.")
-        logger.warning("Screenshot extraction failed: %s", msg)
-        # NOTE: 200 on purpose — a 502 would be intercepted by Cloudflare and
-        # replaced with its own "Bad Gateway" page, hiding the helpful error.
-        return render_page(request, "ai_session.html", {
-            "user": user,
-            "extract_error": f"{msg} — {hint}",
-        })
-    text = (reply.get("text") or "").strip()
-    if not text:
-        # NOTE: 200 + rendered error, not 502 — a 5xx would be intercepted by
-        # Cloudflare and replaced with its own "Bad Gateway" page, hiding the
-        # helpful error (same rationale as the LLMBackendError branch above).
-        return render_page(request, "ai_session.html", {
-            "user": user,
-            "extract_error": "The AI returned an empty response — try again or pick another model.",
-        })
-    try:
-        data = _parse_json_loose(text)
-    except (json.JSONDecodeError, ValueError, RecursionError):
-        return render_page(request, "ai_session.html", {
-            "user": user,
-            "extract_error": ("Could not parse the AI response as JSON — "
-                              "try another model."),
-        })
-    # The reply comes from an LLM — the shape is untrusted. Anything but a
-    # JSON object fails here rather than crashing the route with a 500.
-    if not isinstance(data, dict):
-        return render_page(request, "ai_session.html", {
-            "user": user,
-            "extract_error": ("The AI response was not a JSON object — "
-                              "try another model."),
-        })
+    if use_ocr:
+        try:
+            data = await _run_ocr_extract(raw, date.today())
+        except ocr_mod.OCRError as e:
+            return render_page(request, "ai_session.html", {
+                "user": user,
+                "extract_error": f"OCR extraction failed: {e}",
+            })
+        if not data["exercises"] and not data["cardio"]:
+            return render_page(request, "ai_session.html", {
+                "user": user,
+                "extract_error": ("OCR found no exercises in this screenshot — "
+                                  "try the LLM engine for messy layouts."),
+            })
+        engine_label = "built-in OCR"
+        if engine_name == "auto" and not llm_mod.llm_enabled():
+            engine_label = "built-in OCR (LLM disabled)"
+    else:
+        b64 = base64.b64encode(raw).decode("ascii")
+        try:
+            data = await _llm_extract(b64)
+        except ValueError as e:
+            return render_page(request, "ai_session.html", {
+                "user": user,
+                "extract_error": str(e),
+            })
+        engine_label = await llm_mod.current_model_label()
 
     wanted: list[str] = []
     for e in data.get("exercises") or []:
@@ -678,7 +763,7 @@ async def ai_session_extract(
         "ai_date": parsed_date.isoformat(),
         "ai_notes": data.get("notes") or "",
         "ai_cardio": review_cardio,
-        "model_label": await llm_mod.current_model_label(),
+        "model_label": engine_label,
     })
     return RedirectResponse(
         url=f"/sessions/ai/review?t={token}",
@@ -694,8 +779,16 @@ async def ai_session_save(
 ):
     """Save the reviewed AI session: creates the WorkoutSession with sets and
     any checked cardio activities (in one transaction), then redirects to the
-    session list."""
+    session list.
+
+    Requires the review token from the PRG flow — an old review tab whose
+    token is expired/unknown is rejected, so payloads extracted by older
+    (buggy) builds can never be submitted after a redeploy.
+    """
     form = await request.form()
+    token = _form_str(form.get("t"))
+    # Validate the date before consuming the token: a 400 here must not eat
+    # the PRG entry, or a fixable form error would force a full re-extraction.
     date_str = _form_str(form.get("date"))
     if not date_str:
         raise HTTPException(status_code=400, detail="Date required")
@@ -703,6 +796,13 @@ async def ai_session_save(
         workout_date = date.fromisoformat(str(date_str))
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date")
+    payload = _review_store_consume(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=409,
+            detail=("This review has expired — upload the screenshot again "
+                    "at /sessions/ai."),
+        )
 
     workout = models.WorkoutSession(
         date=workout_date,

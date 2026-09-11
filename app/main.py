@@ -70,7 +70,6 @@ from .load import (
     is_hold_exercise,
     is_hold_name,
     set_reps_value,
-    set_volume,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -827,7 +826,6 @@ async def create_session(request: Request, user: models.User = Depends(get_curre
             template_id = int(_form_str(form["template_id"]))
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid template id")
-    template = db.get(models.SessionTemplate, template_id) if template_id else None
 
     workout = models.WorkoutSession(
         date=workout_date,
@@ -1335,10 +1333,6 @@ async def progression_data(exercise_id: int, user: models.User = Depends(get_cur
         # Effective load per set (app/load.py): bodyweight lifts count
         # BW * factor + added kg − assist; weighted lifts count the
         # logged weight only.
-        base_kg = (
-            bodyweight_kg * exercise_load_factor(exercise)
-            if is_bodyweight else 0.0
-        )
 
         # Weighted entries: sets with an added/logged weight. Bodyweight
         # sets may still carry assist (supported) without added weight.
@@ -1553,7 +1547,7 @@ async def api_create_cardio(
     content_type = request.headers.get("content-type", "")
     if "application/json" in content_type:
         body = await request.json()
-        get = lambda k, d=None: body.get(k, d)
+        get = lambda k, d=None: body.get(k, d)  # noqa: E731
     else:
         form = await request.form()
         def get(k, d=None):
