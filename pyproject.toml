@@ -25,7 +25,23 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "ruff>=0.16",
 ]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Pinned deliberately: ruff's default rule set changes between versions.
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    # `l` is load — strength-training domain convention (app/ocr.py)
+    "E741",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# load_dotenv() must run before the app-module imports pick up DATABASE_URL
+"app/main.py" = ["E402"]
 
 [tool.uv]
 package = true

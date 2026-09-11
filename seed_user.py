@@ -3,7 +3,8 @@
 Create or update the admin user.
 Usage: uv run python seed_user.py <username> <password>
 """
-import sys, os
+import os
+import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 from app.database import Base, engine, SessionLocal

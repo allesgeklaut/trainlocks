@@ -743,7 +743,6 @@ class TestExtractionPRG:
         assert r.status_code == 303
         location = r.headers["location"]
         assert location.startswith("/sessions/ai/review?t=")
-        token = location.split("t=", 1)[1]
 
         # The GET renders the form WITHOUT calling the LLM again.
         r2 = client.get(location)
@@ -763,7 +762,6 @@ class TestExtractionPRG:
         assert 'action="/sessions/ai/extract"' in r.text  # upload form back
 
     def test_review_token_expires_after_ttl(self, client, llm_state, monkeypatch):
-        import time as _time
         from app import ai as ai_mod
         llm_json = json.dumps({"date": None, "exercises": [],
                                "cardio": [], "notes": None})
@@ -783,7 +781,6 @@ class TestExtractionPRG:
         assert client.get(r.headers["location"]).status_code == 200
 
         # Age the entry past the TTL.
-        expired = _time.monotonic() - 1
         with ai_mod._review_store_lock:
             exp, payload = ai_mod._review_store[token]
             ai_mod._review_store[token] = (exp - ai_mod._REVIEW_TTL_SECONDS - 1, payload)
