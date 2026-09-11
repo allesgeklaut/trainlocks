@@ -13,8 +13,6 @@ share the downstream review-form flow untouched:
 """
 
 from __future__ import annotations
-
-import io
 import logging
 import re
 import threading
@@ -636,7 +634,6 @@ def _clean_name(text: str) -> str:
 
 def _parse_cardio_row(row: list[OcrLine]) -> dict[str, Any] | None:
     text = " ".join(l.text for l in row)
-    low = text.lower()
     atype = _cardio_type(text)
     dist = None
     dur = None
@@ -714,8 +711,6 @@ def _extract_card_metrics(
         # Status-bar / tab-bar bands: skip from context as well.
         if row[0].y1 < max_y * 0.05 or row[0].y0 > max_y * 0.95:
             continue
-        row_is_label = any(
-            c.text.lower().strip() in _METRIC_LABELS for c in row)
         next_row = rows[i + 1] if i + 1 < len(rows) else []
         for j, cell in enumerate(row):
             key = _METRIC_LABELS.get(cell.text.lower().strip())
@@ -737,7 +732,6 @@ def _extract_card_metrics(
         # Value-only rows whose label row was above are captured by the
         # label loop; anything else with words is context.
         if not row_is_metric_only(row, metrics):
-            low = text.lower()
             if (not _TIME_OF_DAY_RE.search(text)
                     and not any(c.text.lower().strip() in _METRIC_LABELS
                                 for c in row)

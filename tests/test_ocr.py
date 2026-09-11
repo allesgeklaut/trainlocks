@@ -6,14 +6,13 @@ the layout parser is tested directly with synthetic OcrLine fixtures."""
 
 import json
 import re
-from datetime import date, timedelta
+from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import llm as llm_mod
 from app import models
-from app.ai import _match_or_create_exercises
 from app.auth import COOKIE_NAME, create_session_cookie
 from app.database import Base, SessionLocal, engine
 from app.main import app
@@ -67,7 +66,6 @@ def client(tmp_path, monkeypatch):
 def _mock_ocr_route(monkeypatch, data: dict):
     """Replace the OCR engine + parser with a canned payload."""
     import app.ai as ai_mod
-    from app import ocr as ocr_mod
 
     async def fake_extract(raw, today):
         return data
@@ -333,7 +331,7 @@ class TestEngineSelection:
             chat_calls.append(1)
             raise AssertionError("LLM must not be called for forced OCR")
 
-        monkeypatch.setattr(llm_mod, "chat", fake_chat := fail_chat)
+        monkeypatch.setattr(llm_mod, "chat", fail_chat)
 
         r = self._post(client, "ocr")
         assert r.status_code == 303
