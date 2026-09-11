@@ -286,15 +286,7 @@ async def security_headers_and_origin_check(request: Request, call_next):
                     status_code=403,
                 )
     response = await call_next(request)
-    # no-store for browsers AND CDNs: Cloudflare honours CDN-Cache-Control
-    # / Cloudflare-CDN-Cache-Control over its page-rule defaults, and
-    # Surrogate-Control is the standard fastly-style surrogate hint. Without
-    # these a "Cache Everything" page rule can serve STALE HTML (old builds'
-    # pages/JS) long after a redeploy.
-    response.headers.setdefault("Cache-Control", "no-store, max-age=0")
-    response.headers.setdefault("CDN-Cache-Control", "no-store")
-    response.headers.setdefault("Cloudflare-CDN-Cache-Control", "no-store")
-    response.headers.setdefault("Surrogate-Control", "no-store")
+    response.headers.setdefault("Cache-Control", "no-store")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
     return response
